@@ -417,9 +417,13 @@ static size_t morse_audio_telegraph(const MorseElement *events, size_t element_c
     size_t elem_samples = (size_t)(elem->duration_seconds * params->sample_rate);
 
     if(elem->type == MORSE_GAP) {
-      // Silence for gaps
+      // Optional background room tone during gaps
       for(size_t j = 0; j < elem_samples && samples_written < max_samples; j++) {
-        out_buffer[samples_written++] = 0.0f;
+        float room_tone = 0.0f;
+        if (telegraph->room_tone_level > 0.0f) {
+          room_tone = generate_white_noise() * telegraph->room_tone_level * clamped_volume * 0.1f; // Very subtle
+        }
+        out_buffer[samples_written++] = room_tone;
       }
     } else {
       // Generate click at start of dot/dash
@@ -434,15 +438,46 @@ static size_t morse_audio_telegraph(const MorseElement *events, size_t element_c
         float sharpness_factor = TELEGRAPH_MIN_SHARPNESS +
                                 telegraph->click_sharpness * (TELEGRAPH_MAX_SHARPNESS - TELEGRAPH_MIN_SHARPNESS);
         float attack_envelope = expf(-t * sharpness_factor);
-        float resonance = sinf(2.0f * M_PI * telegraph->resonance_freq * t);
-        float decay = expf(-t * telegraph->decay_rate);
 
-        out_buffer[samples_written++] = resonance * attack_envelope * decay * clamped_volume;
+        // Multiple resonant frequencies layered for realism
+        float signal = 0.0f;
+
+        // Primary resonance with subtle pitch variations
+        float pitch_variation = 1.0f;
+        if (telegraph->mechanical_noise > 0.0f) {
+          float noise = (generate_white_noise() * 2.0f - 1.0f); // -1 to 1
+          pitch_variation = 1.0f + noise * telegraph->mechanical_noise * 0.05f; // ±5% max variation
+        }
+        float varied_freq = telegraph->resonance_freq * pitch_variation;
+        float primary_resonance = sinf(2.0f * M_PI * varied_freq * t);
+
+        // Secondary resonance at higher frequency (harmonic)
+        float secondary_freq = varied_freq * 2.3f; // Not exactly harmonic for realism
+        float secondary_resonance = sinf(2.0f * M_PI * secondary_freq * t) * 0.3f; // Lower amplitude
+
+        // Tertiary resonance at lower frequency (fundamental mechanical)
+        float tertiary_freq = varied_freq * 0.6f;
+        float tertiary_resonance = sinf(2.0f * M_PI * tertiary_freq * t) * 0.2f; // Even lower amplitude
+
+        // Combine resonances
+        signal = primary_resonance + secondary_resonance + tertiary_resonance;
+
+        // Frequency-dependent decay: higher frequencies decay faster
+        // Solenoid response affects the frequency characteristics
+        float freq_factor = telegraph->resonance_freq / 1000.0f; // Normalize to ~1.0 for 1kHz
+        float solenoid_decay_factor = telegraph->decay_rate * (1.0f + freq_factor * telegraph->solenoid_response);
+        float decay = expf(-t * solenoid_decay_factor);
+
+        out_buffer[samples_written++] = signal * attack_envelope * decay * clamped_volume;
       }
 
-      // Fill remainder with silence
+      // Fill remainder with optional background room tone
       for(size_t j = click_samples; j < elem_samples && samples_written < max_samples; j++) {
-        out_buffer[samples_written++] = 0.0f;
+        float room_tone = 0.0f;
+        if (telegraph->room_tone_level > 0.0f) {
+          room_tone = generate_white_noise() * telegraph->room_tone_level * clamped_volume * 0.1f; // Very subtle
+        }
+        out_buffer[samples_written++] = room_tone;
       }
     }
   }

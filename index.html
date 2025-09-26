@@ -83,6 +83,66 @@
         </div>
 
         <div class="param-group">
+            <label for="audioMode">Audio Mode:</label>
+            <select id="audioMode">
+                <option value="0">Radio</option>
+                <option value="1">Telegraph</option>
+            </select>
+        </div>
+
+        <div class="param-group" id="radioParams">
+            <label for="waveform">Waveform:</label>
+            <select id="waveform">
+                <option value="0">Sine</option>
+                <option value="1">Square</option>
+                <option value="2">Sawtooth</option>
+                <option value="3">Triangle</option>
+            </select>
+        </div>
+
+        <div class="param-group" id="backgroundStaticGroup">
+            <label for="backgroundStatic">Background Static:</label>
+            <input type="range" id="backgroundStatic" min="0" max="100" value="0">
+            <span id="backgroundStatic-value">0.0</span>
+        </div>
+
+        <div class="param-group" id="telegraphParams" style="display: none;">
+            <label for="clickSharpness">Click Sharpness:</label>
+            <input type="range" id="clickSharpness" min="0" max="100" value="50">
+            <span id="clickSharpness-value">0.5</span>
+        </div>
+
+        <div class="param-group" id="resonanceFreqGroup" style="display: none;">
+            <label for="resonanceFreq">Resonance Freq:</label>
+            <input type="range" id="resonanceFreq" min="200" max="2000" value="800">
+            <span id="resonanceFreq-value">800</span> Hz
+        </div>
+
+        <div class="param-group" id="decayRateGroup" style="display: none;">
+            <label for="decayRate">Decay Rate:</label>
+            <input type="range" id="decayRate" min="1" max="50" value="10">
+            <span id="decayRate-value">10.0</span>
+        </div>
+
+        <div class="param-group" id="mechanicalNoiseGroup" style="display: none;">
+            <label for="mechanicalNoise">Mechanical Noise:</label>
+            <input type="range" id="mechanicalNoise" min="0" max="100" value="10">
+            <span id="mechanicalNoise-value">0.1</span>
+        </div>
+
+        <div class="param-group" id="solenoidResponseGroup" style="display: none;">
+            <label for="solenoidResponse">Solenoid Response:</label>
+            <input type="range" id="solenoidResponse" min="0" max="100" value="70">
+            <span id="solenoidResponse-value">0.7</span>
+        </div>
+
+        <div class="param-group" id="roomToneLevelGroup" style="display: none;">
+            <label for="roomToneLevel">Room Tone Level:</label>
+            <input type="range" id="roomToneLevel" min="0" max="100" value="5">
+            <span id="roomToneLevel-value">0.05</span>
+        </div>
+
+        <div class="param-group">
             <button id="generate">Generate & Play</button>
             <button id="stop" disabled>Stop</button>
         </div>
@@ -91,7 +151,7 @@
     <div id="status">Ready! Enter text and click Generate & Play.</div>
 
     <script type="module">
-        import { generateMorseAudio, playMorseAudio, ready } from './bindings/javascript/morse.js';
+        import { generateMorseAudio, playMorseAudio, ready, AUDIO_MODE, WAVEFORM_TYPE } from './bindings/javascript/morse.js';
 
         let currentSource = null;
 
@@ -102,6 +162,46 @@
             document.getElementById('volume-value').textContent = (document.getElementById('volume').value / 100).toFixed(1);
             document.getElementById('wordGap-value').textContent = (document.getElementById('wordGap').value / 100).toFixed(1);
             document.getElementById('humanization-value').textContent = (document.getElementById('humanization').value / 100).toFixed(1);
+            document.getElementById('backgroundStatic-value').textContent = (document.getElementById('backgroundStatic').value / 100).toFixed(1);
+            document.getElementById('clickSharpness-value').textContent = (document.getElementById('clickSharpness').value / 100).toFixed(1);
+            document.getElementById('resonanceFreq-value').textContent = document.getElementById('resonanceFreq').value;
+            document.getElementById('decayRate-value').textContent = (document.getElementById('decayRate').value / 1).toFixed(1);
+            document.getElementById('mechanicalNoise-value').textContent = (document.getElementById('mechanicalNoise').value / 100).toFixed(1);
+            document.getElementById('solenoidResponse-value').textContent = (document.getElementById('solenoidResponse').value / 100).toFixed(1);
+            document.getElementById('roomToneLevel-value').textContent = (document.getElementById('roomToneLevel').value / 100).toFixed(2);
+        }
+
+        // Show/hide parameters based on audio mode
+        function updateModeVisibility() {
+            const audioMode = parseInt(document.getElementById('audioMode').value);
+            const radioParams = document.getElementById('radioParams');
+            const backgroundStaticGroup = document.getElementById('backgroundStaticGroup');
+            const telegraphParams = document.getElementById('telegraphParams');
+            const resonanceFreqGroup = document.getElementById('resonanceFreqGroup');
+            const decayRateGroup = document.getElementById('decayRateGroup');
+            const mechanicalNoiseGroup = document.getElementById('mechanicalNoiseGroup');
+            const solenoidResponseGroup = document.getElementById('solenoidResponseGroup');
+            const roomToneLevelGroup = document.getElementById('roomToneLevelGroup');
+
+            if (audioMode === AUDIO_MODE.RADIO) {
+                radioParams.style.display = 'block';
+                backgroundStaticGroup.style.display = 'block';
+                telegraphParams.style.display = 'none';
+                resonanceFreqGroup.style.display = 'none';
+                decayRateGroup.style.display = 'none';
+                mechanicalNoiseGroup.style.display = 'none';
+                solenoidResponseGroup.style.display = 'none';
+                roomToneLevelGroup.style.display = 'none';
+            } else {
+                radioParams.style.display = 'none';
+                backgroundStaticGroup.style.display = 'none';
+                telegraphParams.style.display = 'block';
+                resonanceFreqGroup.style.display = 'block';
+                decayRateGroup.style.display = 'block';
+                mechanicalNoiseGroup.style.display = 'block';
+                solenoidResponseGroup.style.display = 'block';
+                roomToneLevelGroup.style.display = 'block';
+            }
         }
 
         // Add event listeners for sliders
@@ -110,18 +210,41 @@
         document.getElementById('volume').addEventListener('input', updateSliderDisplays);
         document.getElementById('wordGap').addEventListener('input', updateSliderDisplays);
         document.getElementById('humanization').addEventListener('input', updateSliderDisplays);
+        document.getElementById('backgroundStatic').addEventListener('input', updateSliderDisplays);
+        document.getElementById('clickSharpness').addEventListener('input', updateSliderDisplays);
+        document.getElementById('resonanceFreq').addEventListener('input', updateSliderDisplays);
+        document.getElementById('decayRate').addEventListener('input', updateSliderDisplays);
+        document.getElementById('mechanicalNoise').addEventListener('input', updateSliderDisplays);
+        document.getElementById('solenoidResponse').addEventListener('input', updateSliderDisplays);
+        document.getElementById('roomToneLevel').addEventListener('input', updateSliderDisplays);
+        document.getElementById('audioMode').addEventListener('change', updateModeVisibility);
 
         // Generate and play button
         document.getElementById('generate').addEventListener('click', async () => {
+            const audioMode = parseInt(document.getElementById('audioMode').value);
             const params = {
                 text: document.getElementById('text').value,
                 wpm: parseInt(document.getElementById('wpm').value),
-                frequency: parseInt(document.getElementById('frequency').value),
                 volume: parseFloat(document.getElementById('volume').value) / 100,
                 wordGapMultiplier: parseFloat(document.getElementById('wordGap').value) / 100,
                 humanizationFactor: parseFloat(document.getElementById('humanization').value) / 100,
-                randomSeed: parseInt(document.getElementById('randomSeed').value) || 0
+                randomSeed: parseInt(document.getElementById('randomSeed').value) || 0,
+                audioMode: audioMode
             };
+
+            // Add mode-specific parameters
+            if (audioMode === AUDIO_MODE.RADIO) {
+                params.frequency = parseInt(document.getElementById('frequency').value);
+                params.waveformType = parseInt(document.getElementById('waveform').value);
+                params.backgroundStaticLevel = parseFloat(document.getElementById('backgroundStatic').value) / 100;
+            } else if (audioMode === AUDIO_MODE.TELEGRAPH) {
+                params.clickSharpness = parseFloat(document.getElementById('clickSharpness').value) / 100;
+                params.resonanceFreq = parseFloat(document.getElementById('resonanceFreq').value);
+                params.decayRate = parseFloat(document.getElementById('decayRate').value);
+                params.mechanicalNoise = parseFloat(document.getElementById('mechanicalNoise').value) / 100;
+                params.solenoidResponse = parseFloat(document.getElementById('solenoidResponse').value) / 100;
+                params.roomToneLevel = parseFloat(document.getElementById('roomToneLevel').value) / 100;
+            }
 
             document.getElementById('status').textContent = 'Generating audio...';
 
@@ -159,8 +282,9 @@
             }
         });
 
-        // Initialize slider displays
+        // Initialize slider displays and mode visibility
         updateSliderDisplays();
+        updateModeVisibility();
     </script>
 </body>
 </html>

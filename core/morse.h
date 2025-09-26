@@ -45,9 +45,11 @@ typedef struct {
 // Telegraph mode parameters
 typedef struct {
   float click_sharpness;   // Attack steepness (0.0-1.0, 1.0 = sharpest)
-  float resonance_freq;    // Mechanical resonance frequency
+  float resonance_freq;    // Primary mechanical resonance frequency
   float decay_rate;        // Exponential decay rate
   float mechanical_noise;  // Random variations (0.0-1.0)
+  float solenoid_response; // Electrical response characteristics (0.0-1.0)
+  float room_tone_level;   // Background room tone level (0.0-1.0)
 } MorseTelegraphParams;
 
 typedef struct {
@@ -72,7 +74,9 @@ typedef struct {
   .click_sharpness = 0.5f, \
   .resonance_freq = 800.0f, \
   .decay_rate = 10.0f, \
-  .mechanical_noise = 0.1f \
+  .mechanical_noise = 0.1f, \
+  .solenoid_response = 0.7f, \
+  .room_tone_level = 0.05f \
 }
 
 size_t morse_timing(MorseElement *out_elements, size_t max_elements, const char *text, const MorseTimingParams *params);

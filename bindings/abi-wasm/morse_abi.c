@@ -88,6 +88,12 @@ EXPORT int morse_set_f32(MorseCtx* ctx, int key, float value) {
     case MORSE_OPT_MECHANICAL_NOISE:
       ctx->audio_params.mode_params.telegraph.mechanical_noise = value;
       return 1;
+    case MORSE_OPT_SOLENOID_RESPONSE:
+      ctx->audio_params.mode_params.telegraph.solenoid_response = value;
+      return 1;
+    case MORSE_OPT_ROOM_TONE_LEVEL:
+      ctx->audio_params.mode_params.telegraph.room_tone_level = value;
+      return 1;
     default:
       return 0; // Unknown key - no-op
   }
