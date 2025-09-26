@@ -45,14 +45,6 @@ make clean        # Clean all build artifacts
 
 **Component-specific commands:**
 ```bash
-make core-test    # Run only C core tests
-make js-test      # Run only JS binding tests (builds WASM first)
-make core-build   # Build only core C binary
-make js-build     # Build only WASM bindings
-```
-
-**Legacy component commands:**
-```bash
 cd core/
 make              # Build native binary
 make test         # Run core tests
