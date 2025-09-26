@@ -43,6 +43,9 @@ EXPORT int morse_set_i32(MorseCtx* ctx, int key, int value) {
     case MORSE_OPT_SAMPLE_RATE:
       ctx->audio_params.sample_rate = value;
       return 1;
+    case MORSE_OPT_RANDOM_SEED:
+      ctx->timing_params.random_seed = (unsigned int)value;
+      return 1;
     default:
       return 0; // Unknown key - no-op
   }
@@ -57,6 +60,12 @@ EXPORT int morse_set_f32(MorseCtx* ctx, int key, float value) {
       return 1;
     case MORSE_OPT_VOLUME:
       ctx->audio_params.volume = value;
+      return 1;
+    case MORSE_OPT_WORD_GAP_MULTIPLIER:
+      ctx->timing_params.word_gap_multiplier = value;
+      return 1;
+    case MORSE_OPT_HUMANIZATION_FACTOR:
+      ctx->timing_params.humanization_factor = value;
       return 1;
     default:
       return 0; // Unknown key - no-op

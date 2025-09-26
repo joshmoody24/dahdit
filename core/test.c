@@ -211,6 +211,84 @@ static int test_large_text() {
   return audio_ok;
 }
 
+// Test word gap multiplier functionality
+static int test_word_gap_multiplier() {
+  MorseTimingParams params = MORSE_DEFAULT_TIMING_PARAMS;
+  MorseElement elements[50];
+
+  // Test that different multipliers produce different gap durations
+  params.word_gap_multiplier = 2.0f;
+  size_t count = morse_timing(elements, 50, "A B", &params);
+
+  // Find the word gap (should be the longest gap)
+  float long_gap_duration = 0.0f;
+  for (size_t i = 0; i < count; i++) {
+    if (elements[i].type == MORSE_GAP && elements[i].duration_seconds > long_gap_duration) {
+      long_gap_duration = elements[i].duration_seconds;
+    }
+  }
+
+  params.word_gap_multiplier = 1.0f;
+  morse_timing(elements, 50, "A B", &params);
+
+  float normal_gap_duration = 0.0f;
+  for (size_t i = 0; i < count; i++) {
+    if (elements[i].type == MORSE_GAP && elements[i].duration_seconds > normal_gap_duration) {
+      normal_gap_duration = elements[i].duration_seconds;
+    }
+  }
+
+  return long_gap_duration > normal_gap_duration;
+}
+
+// Test humanization factor functionality
+static int test_humanization() {
+  MorseTimingParams params = MORSE_DEFAULT_TIMING_PARAMS;
+  MorseElement elements1[20], elements2[20];
+
+  // Test with different seeds should produce different results
+  params.humanization_factor = 0.5f;
+  params.random_seed = 12345;
+  size_t count1 = morse_timing(elements1, 20, "EEE", &params);
+
+  params.random_seed = 67890;
+  size_t count2 = morse_timing(elements2, 20, "EEE", &params);
+
+  // Should have same number of elements
+  if (count1 != count2) return 0;
+
+  // Check that at least some timings are different (due to different seeds)
+  int found_difference = 0;
+  for (size_t i = 0; i < count1; i++) {
+    if (elements1[i].duration_seconds != elements2[i].duration_seconds) {
+      found_difference = 1;
+      break;
+    }
+  }
+
+  // Verify all durations are positive and reasonable
+  for (size_t i = 0; i < count1; i++) {
+    if (elements1[i].duration_seconds <= 0.0f || elements1[i].duration_seconds > 1.0f) {
+      return 0;
+    }
+  }
+
+  // Test reproducibility: same seed should produce same results
+  params.random_seed = 12345;
+  MorseElement elements3[20];
+  morse_timing(elements3, 20, "EEE", &params);
+
+  int is_reproducible = 1;
+  for (size_t i = 0; i < count1; i++) {
+    if (elements1[i].duration_seconds != elements3[i].duration_seconds) {
+      is_reproducible = 0;
+      break;
+    }
+  }
+
+  return found_difference && is_reproducible;
+}
+
 int main() {
   printf("Morse Code Unit Tests\n");
   printf("====================\n\n");
@@ -223,6 +301,8 @@ int main() {
   TEST(buffer_limits);
   TEST(wpm_timing);
   TEST(large_text);
+  TEST(word_gap_multiplier);
+  TEST(humanization);
 
   printf("\nResults: %d/%d tests passed\n", tests_passed, tests_run);
 
