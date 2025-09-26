@@ -1,0 +1,7 @@
+*.wav
+*.o
+
+core/morse
+
+bindings/javascript/morse-wasm.wasm
+bindings/javascript/morse-wasm.js
