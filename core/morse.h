@@ -23,15 +23,24 @@ typedef struct {
 
 // Audio generation modes
 typedef enum {
-  MORSE_CW = 0,        // Continuous wave (radio)
+  MORSE_RADIO = 0,     // Radio transmission (continuous wave)
   MORSE_TELEGRAPH = 1  // Telegraph clicks
 } MorseAudioMode;
 
-// CW mode parameters
+// Radio waveform types
+typedef enum {
+  MORSE_WAVEFORM_SINE = 0,     // Pure sine wave
+  MORSE_WAVEFORM_SQUARE = 1,   // Square wave
+  MORSE_WAVEFORM_SAWTOOTH = 2, // Sawtooth wave
+  MORSE_WAVEFORM_TRIANGLE = 3  // Triangle wave
+} MorseWaveformType;
+
+// Radio mode parameters
 typedef struct {
   float freq_hz;                // Tone frequency
+  MorseWaveformType waveform_type; // Waveform shape
   float background_static_level; // Static noise level (0.0-1.0)
-} MorseCWParams;
+} MorseRadioParams;
 
 // Telegraph mode parameters
 typedef struct {
@@ -46,7 +55,7 @@ typedef struct {
   float volume;
   MorseAudioMode audio_mode;
   union {
-    MorseCWParams cw;
+    MorseRadioParams radio;
     MorseTelegraphParams telegraph;
   } mode_params;
 } MorseAudioParams;
@@ -55,8 +64,8 @@ typedef struct {
 #define MORSE_DEFAULT_AUDIO_PARAMS (MorseAudioParams){ \
   .sample_rate = 44100, \
   .volume = 0.5f, \
-  .audio_mode = MORSE_CW, \
-  .mode_params.cw = {.freq_hz = 440.0f, .background_static_level = 0.0f} \
+  .audio_mode = MORSE_RADIO, \
+  .mode_params.radio = {.freq_hz = 440.0f, .waveform_type = MORSE_WAVEFORM_SINE, .background_static_level = 0.0f} \
 }
 
 #define MORSE_DEFAULT_TELEGRAPH_PARAMS (MorseTelegraphParams){ \

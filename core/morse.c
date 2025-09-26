@@ -16,6 +16,41 @@ const float TELEGRAPH_CLICK_DURATION_SEC = 0.010f;  // 10ms click duration
 const float TELEGRAPH_MIN_SHARPNESS = 1.0f;         // Minimum attack sharpness factor
 const float TELEGRAPH_MAX_SHARPNESS = 1000.0f;      // Maximum attack sharpness factor
 
+// White noise generator
+static float generate_white_noise(void) {
+  // Simple white noise using rand() - normalized to [-1, 1]
+  return (2.0f * (float)rand() / (float)RAND_MAX) - 1.0f;
+}
+
+// Waveform generation functions
+static float generate_waveform(MorseWaveformType waveform_type, float frequency, float time) {
+  float phase = 2.0f * M_PI * frequency * time;
+
+  switch (waveform_type) {
+    case MORSE_WAVEFORM_SINE:
+      return sinf(phase);
+
+    case MORSE_WAVEFORM_SQUARE:
+      return sinf(phase) >= 0.0f ? 1.0f : -1.0f;
+
+    case MORSE_WAVEFORM_SAWTOOTH:
+      // Normalize phase to [0, 2π] then map to [-1, 1]
+      phase = fmodf(phase, 2.0f * M_PI);
+      return (phase / M_PI) - 1.0f;
+
+    case MORSE_WAVEFORM_TRIANGLE:
+      phase = fmodf(phase, 2.0f * M_PI);
+      if (phase <= M_PI) {
+        return (2.0f * phase / M_PI) - 1.0f;  // Rising edge: -1 to 1
+      } else {
+        return 3.0f - (2.0f * phase / M_PI);  // Falling edge: 1 to -1
+      }
+
+    default:
+      return sinf(phase);  // Fallback to sine
+  }
+}
+
 // Simple humanization - adds random variation to timing with bounded output
 static float apply_humanization(float base_duration, float humanization_factor) {
   if (humanization_factor <= 0.0f) return base_duration;
@@ -289,10 +324,10 @@ size_t morse_timing(MorseElement *out_elements, size_t max_elements, const char 
   return morse_timing_process(text, params, out_elements, max_elements);
 }
 
-// CW mode audio generation
-static size_t morse_audio_cw(const MorseElement *events, size_t element_count, float *out_buffer, size_t max_samples, const MorseAudioParams *params) {
-  const MorseCWParams *cw = &params->mode_params.cw;
-  if(cw->freq_hz <= 0.0f || cw->freq_hz > 20000.0f) return 0; // Invalid frequency
+// Radio mode audio generation
+static size_t morse_audio_radio(const MorseElement *events, size_t element_count, float *out_buffer, size_t max_samples, const MorseAudioParams *params) {
+  const MorseRadioParams *radio = &params->mode_params.radio;
+  if(radio->freq_hz <= 0.0f || radio->freq_hz > 20000.0f) return 0; // Invalid frequency
 
   float clamped_volume = params->volume < 0.0f ? 0.0f : (params->volume > 1.0f ? 1.0f : params->volume);
 
@@ -303,7 +338,14 @@ static size_t morse_audio_cw(const MorseElement *events, size_t element_count, f
 
     if(elem->type == MORSE_GAP) {
       for(size_t j = 0; j < elem_samples && samples_written < max_samples; j++) {
-        out_buffer[samples_written++] = 0.0f;
+        float signal = 0.0f;
+
+        // Add background static if enabled (continuous during gaps)
+        if (radio->background_static_level > 0.0f) {
+          signal = generate_white_noise() * radio->background_static_level * clamped_volume;
+        }
+
+        out_buffer[samples_written++] = signal;
       }
     } else {
       size_t attack_samples = (size_t)((ATTACK_MS / 1000.0f) * params->sample_rate);
@@ -320,20 +362,44 @@ static size_t morse_audio_cw(const MorseElement *events, size_t element_count, f
       for(size_t j = 0; j < attack_samples && samples_written < max_samples; j++) {
         float t = (float)j / params->sample_rate;
         float envelope = (float)j / attack_samples;
-        out_buffer[samples_written++] = sinf(2.0f * M_PI * cw->freq_hz * t) * clamped_volume * envelope;
+        float waveform = generate_waveform(radio->waveform_type, radio->freq_hz, t);
+        float signal = waveform * clamped_volume * envelope;
+
+        // Add background static if enabled
+        if (radio->background_static_level > 0.0f) {
+          signal += generate_white_noise() * radio->background_static_level * clamped_volume;
+        }
+
+        out_buffer[samples_written++] = signal;
       }
 
       // Sustain phase
       for(size_t j = sustain_start; j < release_start && samples_written < max_samples; j++) {
         float t = (float)j / params->sample_rate;
-        out_buffer[samples_written++] = sinf(2.0f * M_PI * cw->freq_hz * t) * clamped_volume;
+        float waveform = generate_waveform(radio->waveform_type, radio->freq_hz, t);
+        float signal = waveform * clamped_volume;
+
+        // Add background static if enabled
+        if (radio->background_static_level > 0.0f) {
+          signal += generate_white_noise() * radio->background_static_level * clamped_volume;
+        }
+
+        out_buffer[samples_written++] = signal;
       }
 
       // Release phase
       for(size_t j = release_start; j < elem_samples && samples_written < max_samples; j++) {
         float t = (float)j / params->sample_rate;
         float envelope = (float)(elem_samples - j) / release_samples;
-        out_buffer[samples_written++] = sinf(2.0f * M_PI * cw->freq_hz * t) * clamped_volume * envelope;
+        float waveform = generate_waveform(radio->waveform_type, radio->freq_hz, t);
+        float signal = waveform * clamped_volume * envelope;
+
+        // Add background static if enabled
+        if (radio->background_static_level > 0.0f) {
+          signal += generate_white_noise() * radio->background_static_level * clamped_volume;
+        }
+
+        out_buffer[samples_written++] = signal;
       }
     }
   }
@@ -389,8 +455,8 @@ size_t morse_audio(const MorseElement *events, size_t element_count, float *out_
   if(params->sample_rate <= 0 || params->sample_rate > 192000) return 0;
 
   switch(params->audio_mode) {
-    case MORSE_CW:
-      return morse_audio_cw(events, element_count, out_buffer, max_samples, params);
+    case MORSE_RADIO:
+      return morse_audio_radio(events, element_count, out_buffer, max_samples, params);
     case MORSE_TELEGRAPH:
       return morse_audio_telegraph(events, element_count, out_buffer, max_samples, params);
     default:

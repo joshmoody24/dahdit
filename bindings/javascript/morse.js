@@ -22,17 +22,26 @@ export const OPT = {
   HUMANIZATION_FACTOR: 5,
   RANDOM_SEED: 6,
   AUDIO_MODE: 7,
-  BACKGROUND_STATIC_LEVEL: 8,
-  CLICK_SHARPNESS: 9,
-  RESONANCE_FREQ: 10,
-  DECAY_RATE: 11,
-  MECHANICAL_NOISE: 12
+  WAVEFORM_TYPE: 8,
+  BACKGROUND_STATIC_LEVEL: 9,
+  CLICK_SHARPNESS: 10,
+  RESONANCE_FREQ: 11,
+  DECAY_RATE: 12,
+  MECHANICAL_NOISE: 13
 };
 
 // Audio mode constants
 export const AUDIO_MODE = {
-  CW: 0,
+  RADIO: 0,
   TELEGRAPH: 1
+};
+
+// Waveform type constants
+export const WAVEFORM_TYPE = {
+  SINE: 0,
+  SQUARE: 1,
+  SAWTOOTH: 2,
+  TRIANGLE: 3
 };
 
 /**
@@ -56,9 +65,10 @@ export const AUDIO_MODE = {
  */
 
 /**
- * @typedef {MorseAudioBaseParams & Object} MorseCWAudioParams
- * @property {0} [audioMode] - CW audio mode
+ * @typedef {MorseAudioBaseParams & Object} MorseRadioAudioParams
+ * @property {0} [audioMode] - Radio audio mode
  * @property {number} [frequency=440] - Tone frequency in Hz
+ * @property {number} [waveformType=0] - Waveform shape (0=Sine, 1=Square, 2=Sawtooth, 3=Triangle)
  * @property {number} [backgroundStaticLevel=0.0] - Background static level (0.0-1.0)
  */
 
@@ -72,7 +82,7 @@ export const AUDIO_MODE = {
  */
 
 /**
- * @typedef {MorseCWAudioParams | MorseTelegraphAudioParams} MorseAudioParams
+ * @typedef {MorseRadioAudioParams | MorseTelegraphAudioParams} MorseAudioParams
  */
 
 /**
@@ -94,7 +104,7 @@ function validateTimingParams({ text, wpm, wordGapMultiplier, humanizationFactor
  * @throws {Error} If validation fails
  */
 function validateAudioParams(params) {
-  const { text, wpm, wordGapMultiplier, humanizationFactor, randomSeed, sampleRate, volume, audioMode = AUDIO_MODE.CW } = params;
+  const { text, wpm, wordGapMultiplier, humanizationFactor, randomSeed, sampleRate, volume, audioMode = AUDIO_MODE.RADIO } = params;
 
   // Validate base parameters
   validateTimingParams({ text, wpm, wordGapMultiplier, humanizationFactor, randomSeed });
@@ -105,14 +115,17 @@ function validateAudioParams(params) {
     throw new Error("Volume must be between 0.0 and 1.0");
   }
   if (!Number.isInteger(audioMode) || audioMode < 0 || audioMode > 1) {
-    throw new Error("Audio mode must be 0 (CW) or 1 (Telegraph)");
+    throw new Error("Audio mode must be 0 (Radio) or 1 (Telegraph)");
   }
 
-  // CW mode parameter validation
-  if (audioMode === AUDIO_MODE.CW) {
-    const { frequency, backgroundStaticLevel } = params;
+  // Radio mode parameter validation
+  if (audioMode === AUDIO_MODE.RADIO) {
+    const { frequency, waveformType, backgroundStaticLevel } = params;
     if (frequency !== undefined && (typeof frequency !== 'number' || frequency <= 0 || frequency > 20000)) {
       throw new Error("Frequency must be between 1 and 20000 Hz");
+    }
+    if (waveformType !== undefined && (!Number.isInteger(waveformType) || waveformType < 0 || waveformType > 3)) {
+      throw new Error("Waveform type must be 0 (Sine), 1 (Square), 2 (Sawtooth), or 3 (Triangle)");
     }
     if (backgroundStaticLevel !== undefined && (typeof backgroundStaticLevel !== 'number' || backgroundStaticLevel < 0 || backgroundStaticLevel > 1)) {
       throw new Error("Background static level must be between 0.0 and 1.0");
@@ -222,9 +235,10 @@ function generateMorseAudio({
   wordGapMultiplier = 1.0,
   humanizationFactor = 0.0,
   randomSeed = 0,
-  audioMode = AUDIO_MODE.CW,
-  // CW mode parameters
+  audioMode = AUDIO_MODE.RADIO,
+  // Radio mode parameters
   frequency = 440,
+  waveformType = WAVEFORM_TYPE.SINE,
   backgroundStaticLevel = 0.0,
   // Telegraph mode parameters
   clickSharpness = 0.5,
@@ -235,7 +249,7 @@ function generateMorseAudio({
   if (!module) throw new Error("WebAssembly module not loaded yet. Try awaiting ready first.");
   validateAudioParams({
     text, wpm, sampleRate, volume, wordGapMultiplier, humanizationFactor, randomSeed, audioMode,
-    frequency, backgroundStaticLevel, clickSharpness, resonanceFreq, decayRate, mechanicalNoise
+    frequency, waveformType, backgroundStaticLevel, clickSharpness, resonanceFreq, decayRate, mechanicalNoise
   });
 
   const morse_new = module.cwrap("morse_new", "number", []);
@@ -263,8 +277,9 @@ function generateMorseAudio({
   morse_set_i32(ctx, OPT.AUDIO_MODE, audioMode);
 
   // Set mode-specific parameters
-  if (audioMode === AUDIO_MODE.CW) {
+  if (audioMode === AUDIO_MODE.RADIO) {
     morse_set_f32(ctx, OPT.FREQ_HZ, frequency);
+    morse_set_i32(ctx, OPT.WAVEFORM_TYPE, waveformType);
     morse_set_f32(ctx, OPT.BACKGROUND_STATIC_LEVEL, backgroundStaticLevel);
   } else if (audioMode === AUDIO_MODE.TELEGRAPH) {
     morse_set_f32(ctx, OPT.CLICK_SHARPNESS, clickSharpness);

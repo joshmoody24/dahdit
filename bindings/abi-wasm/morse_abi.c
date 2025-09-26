@@ -49,6 +49,9 @@ EXPORT int morse_set_i32(MorseCtx* ctx, int key, int value) {
     case MORSE_OPT_AUDIO_MODE:
       ctx->audio_params.audio_mode = (MorseAudioMode)value;
       return 1;
+    case MORSE_OPT_WAVEFORM_TYPE:
+      ctx->audio_params.mode_params.radio.waveform_type = (MorseWaveformType)value;
+      return 1;
     default:
       return 0; // Unknown key - no-op
   }
@@ -59,7 +62,7 @@ EXPORT int morse_set_f32(MorseCtx* ctx, int key, float value) {
 
   switch (key) {
     case MORSE_OPT_FREQ_HZ:
-      ctx->audio_params.mode_params.cw.freq_hz = value;
+      ctx->audio_params.mode_params.radio.freq_hz = value;
       return 1;
     case MORSE_OPT_VOLUME:
       ctx->audio_params.volume = value;
@@ -71,7 +74,7 @@ EXPORT int morse_set_f32(MorseCtx* ctx, int key, float value) {
       ctx->timing_params.humanization_factor = value;
       return 1;
     case MORSE_OPT_BACKGROUND_STATIC_LEVEL:
-      ctx->audio_params.mode_params.cw.background_static_level = value;
+      ctx->audio_params.mode_params.radio.background_static_level = value;
       return 1;
     case MORSE_OPT_CLICK_SHARPNESS:
       ctx->audio_params.mode_params.telegraph.click_sharpness = value;

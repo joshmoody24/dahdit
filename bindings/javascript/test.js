@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { generateMorseTiming, generateMorseAudio, playMorseAudio, ready, AUDIO_MODE } from './morse.js';
+import { generateMorseTiming, generateMorseAudio, playMorseAudio, ready, AUDIO_MODE, WAVEFORM_TYPE } from './morse.js';
 
 // Simple test framework
 let testsRun = 0;
@@ -98,11 +98,11 @@ test('large_text', () => {
   return result.audioData.length > 1000 && result.duration > 1.0;
 });
 
-// Test CW mode audio generation
-test('cw_mode_audio', () => {
+// Test Radio mode audio generation
+test('radio_mode_audio', () => {
   const result = generateMorseAudio({
     text: 'SOS',
-    audioMode: AUDIO_MODE.CW,
+    audioMode: AUDIO_MODE.RADIO,
     frequency: 600,
     backgroundStaticLevel: 0.1,
     sampleRate: 8000
@@ -138,12 +138,12 @@ test('audio_mode_validation', () => {
   }
 });
 
-// Test CW mode parameter validation
-test('cw_parameter_validation', () => {
+// Test Radio mode parameter validation
+test('radio_parameter_validation', () => {
   try {
     generateMorseAudio({
       text: 'SOS',
-      audioMode: AUDIO_MODE.CW,
+      audioMode: AUDIO_MODE.RADIO,
       frequency: -100, // Invalid frequency
       sampleRate: 8000
     });
@@ -166,6 +166,67 @@ test('telegraph_parameter_validation', () => {
   } catch (error) {
     return error.message.includes('Click sharpness');
   }
+});
+
+// Test Radio mode waveform types
+test('radio_waveform_types', () => {
+  const waveforms = [WAVEFORM_TYPE.SINE, WAVEFORM_TYPE.SQUARE, WAVEFORM_TYPE.SAWTOOTH, WAVEFORM_TYPE.TRIANGLE];
+
+  for (const waveformType of waveforms) {
+    const result = generateMorseAudio({
+      text: 'E',
+      audioMode: AUDIO_MODE.RADIO,
+      waveformType,
+      sampleRate: 8000
+    });
+    if (result.audioData.length === 0 || result.duration === 0) {
+      return false;
+    }
+  }
+  return true;
+});
+
+// Test waveform type validation
+test('waveform_type_validation', () => {
+  try {
+    generateMorseAudio({
+      text: 'SOS',
+      audioMode: AUDIO_MODE.RADIO,
+      waveformType: 4, // Invalid (> 3)
+      sampleRate: 8000
+    });
+    return false; // Should have thrown
+  } catch (error) {
+    return error.message.includes('Waveform type');
+  }
+});
+
+// Test background static
+test('background_static', () => {
+  const withStatic = generateMorseAudio({
+    text: 'E',
+    audioMode: AUDIO_MODE.RADIO,
+    backgroundStaticLevel: 0.3,
+    sampleRate: 8000
+  });
+
+  const withoutStatic = generateMorseAudio({
+    text: 'E',
+    audioMode: AUDIO_MODE.RADIO,
+    backgroundStaticLevel: 0.0,
+    sampleRate: 8000
+  });
+
+  // Audio with static should be different from without static
+  // Check that they have different energy levels
+  let staticSum = 0, cleanSum = 0;
+  for (let i = 0; i < Math.min(withStatic.audioData.length, withoutStatic.audioData.length); i++) {
+    staticSum += Math.abs(withStatic.audioData[i]);
+    cleanSum += Math.abs(withoutStatic.audioData[i]);
+  }
+
+  // Static version should have higher average energy
+  return staticSum > cleanSum;
 });
 
 console.log(`\nResults: ${testsPassed}/${testsRun} tests passed`);
