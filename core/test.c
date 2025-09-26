@@ -3,6 +3,7 @@
 #include <string.h>
 #include <math.h>
 #include <assert.h>
+#include <stdlib.h>
 
 // Test result tracking
 static int tests_run = 0;
@@ -166,6 +167,50 @@ static int test_wpm_timing() {
   return 1;
 }
 
+// Test with larger text strings
+static int test_large_text() {
+  MorseTimingParams params = MORSE_DEFAULT_TIMING_PARAMS;
+  MorseElement elements[1000]; // Large buffer
+
+  // Test a typical sentence
+  const char* sentence = "THE QUICK BROWN FOX JUMPS OVER THE LAZY DOG 1234567890";
+  size_t count = morse_timing(elements, 1000, sentence, &params);
+
+  if (count == 0 || count > 1000) return 0;
+
+  // Verify we got a mix of element types
+  int has_dots = 0, has_dashes = 0, has_gaps = 0;
+  for (size_t i = 0; i < count; i++) {
+    if (elements[i].type == MORSE_DOT) has_dots = 1;
+    if (elements[i].type == MORSE_DASH) has_dashes = 1;
+    if (elements[i].type == MORSE_GAP) has_gaps = 1;
+  }
+
+  if (!has_dots || !has_dashes || !has_gaps) return 0;
+
+  // Test audio generation with the large timing data
+  MorseAudioParams audio_params = MORSE_DEFAULT_AUDIO_PARAMS;
+  audio_params.sample_rate = 8000; // Keep sample rate low for test performance
+
+  // Calculate expected audio size
+  float total_duration = 0;
+  for (size_t i = 0; i < count; i++) {
+    total_duration += elements[i].duration_seconds;
+  }
+
+  size_t expected_samples = (size_t)(total_duration * audio_params.sample_rate);
+  float* audio_buffer = malloc(expected_samples * sizeof(float));
+  if (!audio_buffer) return 0;
+
+  size_t actual_samples = morse_audio(elements, count, audio_buffer, expected_samples, &audio_params);
+
+  // Should generate reasonable number of samples
+  int audio_ok = (actual_samples > 0 && actual_samples <= expected_samples);
+
+  free(audio_buffer);
+  return audio_ok;
+}
+
 int main() {
   printf("Morse Code Unit Tests\n");
   printf("====================\n\n");
@@ -177,6 +222,7 @@ int main() {
   TEST(input_validation);
   TEST(buffer_limits);
   TEST(wpm_timing);
+  TEST(large_text);
 
   printf("\nResults: %d/%d tests passed\n", tests_passed, tests_run);
 
