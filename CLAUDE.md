@@ -35,20 +35,34 @@ This is a **multi-layer architecture** with a C core compiled to both native bin
 
 ## Build Commands
 
-**Native C development:**
+**Universal commands (from project root):**
+```bash
+make test         # Run all tests (C core + JS bindings)
+make build        # Build everything (core binary + WASM)
+make dev          # Run tests then build everything
+make clean        # Clean all build artifacts
+```
+
+**Component-specific commands:**
+```bash
+make core-test    # Run only C core tests
+make js-test      # Run only JS binding tests (builds WASM first)
+make core-build   # Build only core C binary
+make js-build     # Build only WASM bindings
+```
+
+**Legacy component commands:**
 ```bash
 cd core/
 make              # Build native binary
+make test         # Run core tests
 make run          # Build and run stress tests
 make clean        # Clean build artifacts
-```
 
-**WebAssembly development:**
-```bash
 cd bindings/javascript/
 make              # Build WebAssembly modules
+npm test          # Run JavaScript binding tests
 make clean        # Clean WASM artifacts
-npm run build     # Same as make (for package.json compatibility)
 ```
 
 **Development environment:**

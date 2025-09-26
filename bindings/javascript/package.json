@@ -17,6 +17,7 @@
   ],
   "scripts": {
     "build": "make clean && make",
+    "test": "node test.js",
     "prepublishOnly": "npm run build"
   },
   "repository": {
