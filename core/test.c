@@ -11,7 +11,7 @@ static int tests_passed = 0;
 #define TEST(name) \
   do { \
     tests_run++; \
-    printf("Running %s... ", name); \
+    printf("Running %s... ", #name); \
     if (test_##name()) { \
       tests_passed++; \
       printf("PASS\n"); \

@@ -146,7 +146,8 @@ static size_t morse_timing_process(const char *text, const MorseTimingParams *pa
         if(pattern) {
           // Add 1-dot gap between characters in prosign (except for first character)
           if(prosign_char_count > 0) {
-            if(out_elements && count < max_elements) {
+            if(out_elements) {
+              if(count >= max_elements) break;
               out_elements[count] = (MorseElement){MORSE_GAP, dot_sec};
             }
             count++;
@@ -166,7 +167,8 @@ static size_t morse_timing_process(const char *text, const MorseTimingParams *pa
 
             // Add inter-element gap (except after last element)
             if(pattern[j+1] != -1) {
-              if(out_elements && count < max_elements) {
+              if(out_elements) {
+                if(count >= max_elements) break;
                 out_elements[count] = (MorseElement){MORSE_GAP, dot_sec};
               }
               count++;
@@ -196,7 +198,8 @@ static size_t morse_timing_process(const char *text, const MorseTimingParams *pa
           }
           
           if(should_add_gap) {
-            if(out_elements && count < max_elements) {
+            if(out_elements) {
+              if(count >= max_elements) break;
               out_elements[count] = (MorseElement){MORSE_GAP, dot_sec * 3};
             }
             count++;
@@ -217,7 +220,8 @@ static size_t morse_timing_process(const char *text, const MorseTimingParams *pa
 
           // Add inter-element gap (except after last element)
           if(pattern[j+1] != -1) {
-            if(out_elements && count < max_elements) {
+            if(out_elements) {
+              if(count >= max_elements) break;
               out_elements[count] = (MorseElement){MORSE_GAP, dot_sec};
             }
             count++;
