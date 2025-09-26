@@ -1,10 +1,10 @@
 #include "morse.h"
 #include <math.h>
 
-const float DOT_LENGTH_WPM = 1.2f;
-const int DOTS_PER_DASH = 3;
-const float ATTACK_MS = 5.0f;
-const float RELEASE_MS = 5.0f;
+const float DOT_LENGTH_WPM = 1.2f;      // Standard ITU timing formula: dot duration = 1.2 / WPM seconds
+const int DOTS_PER_DASH = 3;           // ITU specification: dash = 3 dot durations
+const float ATTACK_MS = 5.0f;          // Envelope attack time to prevent audio clicks
+const float RELEASE_MS = 5.0f;         // Envelope release time to prevent audio clicks
 
 // Morse code patterns using direct array indexing (O(1) lookup)
 // Pattern format: dots=0, dashes=1, terminated by -1
@@ -102,6 +102,7 @@ static const int* morse_patterns[256] = {
 // Internal function for processing morse text - shared by timing and size functions
 static size_t morse_timing_process(const char *text, const MorseTimingParams *params, MorseElement *out_elements, size_t max_elements) {
   if(!text || !params) return 0;
+  if(params->wpm <= 0) return 0; // Invalid WPM
 
   float dot_sec = DOT_LENGTH_WPM / params->wpm;
   size_t count = 0;
@@ -237,6 +238,8 @@ size_t morse_timing(MorseElement *out_elements, size_t max_elements, const char 
 
 size_t morse_audio(const MorseElement *events, size_t element_count, float *out_buffer, size_t max_samples, const MorseAudioParams *params) {
   if(!events || !out_buffer || !params) return 0;
+  if(params->sample_rate <= 0 || params->sample_rate > 192000) return 0; // Invalid sample rate
+  if(params->freq_hz <= 0.0f || params->freq_hz > 20000.0f) return 0; // Invalid frequency
 
   float clamped_volume = params->volume < 0.0f ? 0.0f : (params->volume > 1.0f ? 1.0f : params->volume);
 
@@ -290,6 +293,7 @@ size_t morse_timing_size(const char *text, const MorseTimingParams *params) {
 
 size_t morse_audio_size(const MorseElement *events, size_t element_count, const MorseAudioParams *params) {
   if(!events || !params) return 0;
+  if(params->sample_rate <= 0 || params->sample_rate > 192000) return 0; // Invalid sample rate
 
   size_t total_samples = 0;
   for(size_t i = 0; i < element_count; i++) {
