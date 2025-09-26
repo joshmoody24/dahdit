@@ -21,14 +21,50 @@ typedef struct {
   unsigned int random_seed;     // Random seed for humanization (0 = use time)
 } MorseTimingParams;
 
+// Audio generation modes
+typedef enum {
+  MORSE_CW = 0,        // Continuous wave (radio)
+  MORSE_TELEGRAPH = 1  // Telegraph clicks
+} MorseAudioMode;
+
+// CW mode parameters
+typedef struct {
+  float freq_hz;                // Tone frequency
+  float background_static_level; // Static noise level (0.0-1.0)
+} MorseCWParams;
+
+// Telegraph mode parameters
+typedef struct {
+  float click_sharpness;   // Attack steepness (0.0-1.0, 1.0 = sharpest)
+  float resonance_freq;    // Mechanical resonance frequency
+  float decay_rate;        // Exponential decay rate
+  float mechanical_noise;  // Random variations (0.0-1.0)
+} MorseTelegraphParams;
+
 typedef struct {
   int sample_rate;
-  float freq_hz;
   float volume;
+  MorseAudioMode audio_mode;
+  union {
+    MorseCWParams cw;
+    MorseTelegraphParams telegraph;
+  } mode_params;
 } MorseAudioParams;
 
 #define MORSE_DEFAULT_TIMING_PARAMS (MorseTimingParams){.wpm = 20, .word_gap_multiplier = 1.0f, .humanization_factor = 0.0f, .random_seed = 0}
-#define MORSE_DEFAULT_AUDIO_PARAMS (MorseAudioParams){.sample_rate = 44100, .freq_hz = 440.0f, .volume = 0.5f}
+#define MORSE_DEFAULT_AUDIO_PARAMS (MorseAudioParams){ \
+  .sample_rate = 44100, \
+  .volume = 0.5f, \
+  .audio_mode = MORSE_CW, \
+  .mode_params.cw = {.freq_hz = 440.0f, .background_static_level = 0.0f} \
+}
+
+#define MORSE_DEFAULT_TELEGRAPH_PARAMS (MorseTelegraphParams){ \
+  .click_sharpness = 0.5f, \
+  .resonance_freq = 800.0f, \
+  .decay_rate = 10.0f, \
+  .mechanical_noise = 0.1f \
+}
 
 size_t morse_timing(MorseElement *out_elements, size_t max_elements, const char *text, const MorseTimingParams *params);
 

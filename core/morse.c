@@ -11,6 +11,11 @@ const float ATTACK_MS = 5.0f;          // Envelope attack time to prevent audio 
 const float RELEASE_MS = 5.0f;         // Envelope release time to prevent audio clicks
 const float HUMANIZATION_MAX_VARIANCE = 0.3f;  // Maximum timing variation as fraction of base duration
 
+// Telegraph mode constants
+const float TELEGRAPH_CLICK_DURATION_SEC = 0.010f;  // 10ms click duration
+const float TELEGRAPH_MIN_SHARPNESS = 1.0f;         // Minimum attack sharpness factor
+const float TELEGRAPH_MAX_SHARPNESS = 1000.0f;      // Maximum attack sharpness factor
+
 // Simple humanization - adds random variation to timing with bounded output
 static float apply_humanization(float base_duration, float humanization_factor) {
   if (humanization_factor <= 0.0f) return base_duration;
@@ -284,10 +289,10 @@ size_t morse_timing(MorseElement *out_elements, size_t max_elements, const char 
   return morse_timing_process(text, params, out_elements, max_elements);
 }
 
-size_t morse_audio(const MorseElement *events, size_t element_count, float *out_buffer, size_t max_samples, const MorseAudioParams *params) {
-  if(!events || !out_buffer || !params) return 0;
-  if(params->sample_rate <= 0 || params->sample_rate > 192000) return 0; // Invalid sample rate
-  if(params->freq_hz <= 0.0f || params->freq_hz > 20000.0f) return 0; // Invalid frequency
+// CW mode audio generation
+static size_t morse_audio_cw(const MorseElement *events, size_t element_count, float *out_buffer, size_t max_samples, const MorseAudioParams *params) {
+  const MorseCWParams *cw = &params->mode_params.cw;
+  if(cw->freq_hz <= 0.0f || cw->freq_hz > 20000.0f) return 0; // Invalid frequency
 
   float clamped_volume = params->volume < 0.0f ? 0.0f : (params->volume > 1.0f ? 1.0f : params->volume);
 
@@ -315,24 +320,82 @@ size_t morse_audio(const MorseElement *events, size_t element_count, float *out_
       for(size_t j = 0; j < attack_samples && samples_written < max_samples; j++) {
         float t = (float)j / params->sample_rate;
         float envelope = (float)j / attack_samples;
-        out_buffer[samples_written++] = sinf(2.0f * M_PI * params->freq_hz * t) * clamped_volume * envelope;
+        out_buffer[samples_written++] = sinf(2.0f * M_PI * cw->freq_hz * t) * clamped_volume * envelope;
       }
 
       // Sustain phase
       for(size_t j = sustain_start; j < release_start && samples_written < max_samples; j++) {
         float t = (float)j / params->sample_rate;
-        out_buffer[samples_written++] = sinf(2.0f * M_PI * params->freq_hz * t) * clamped_volume;
+        out_buffer[samples_written++] = sinf(2.0f * M_PI * cw->freq_hz * t) * clamped_volume;
       }
 
       // Release phase
       for(size_t j = release_start; j < elem_samples && samples_written < max_samples; j++) {
         float t = (float)j / params->sample_rate;
         float envelope = (float)(elem_samples - j) / release_samples;
-        out_buffer[samples_written++] = sinf(2.0f * M_PI * params->freq_hz * t) * clamped_volume * envelope;
+        out_buffer[samples_written++] = sinf(2.0f * M_PI * cw->freq_hz * t) * clamped_volume * envelope;
       }
     }
   }
   return samples_written;
+}
+
+// Telegraph mode audio generation
+static size_t morse_audio_telegraph(const MorseElement *events, size_t element_count, float *out_buffer, size_t max_samples, const MorseAudioParams *params) {
+  const MorseTelegraphParams *telegraph = &params->mode_params.telegraph;
+  float clamped_volume = params->volume < 0.0f ? 0.0f : (params->volume > 1.0f ? 1.0f : params->volume);
+
+  size_t samples_written = 0;
+  for(size_t i = 0; i < element_count && samples_written < max_samples; i++) {
+    const MorseElement *elem = &events[i];
+    size_t elem_samples = (size_t)(elem->duration_seconds * params->sample_rate);
+
+    if(elem->type == MORSE_GAP) {
+      // Silence for gaps
+      for(size_t j = 0; j < elem_samples && samples_written < max_samples; j++) {
+        out_buffer[samples_written++] = 0.0f;
+      }
+    } else {
+      // Generate click at start of dot/dash
+      size_t click_samples = (size_t)(TELEGRAPH_CLICK_DURATION_SEC * params->sample_rate);
+      if(click_samples > elem_samples) click_samples = elem_samples;
+
+      for(size_t j = 0; j < click_samples && samples_written < max_samples; j++) {
+        float t = (float)j / params->sample_rate;
+
+        // Sharp attack followed by resonant decay
+        // Map 0-1 sharpness to exponential range
+        float sharpness_factor = TELEGRAPH_MIN_SHARPNESS +
+                                telegraph->click_sharpness * (TELEGRAPH_MAX_SHARPNESS - TELEGRAPH_MIN_SHARPNESS);
+        float attack_envelope = expf(-t * sharpness_factor);
+        float resonance = sinf(2.0f * M_PI * telegraph->resonance_freq * t);
+        float decay = expf(-t * telegraph->decay_rate);
+
+        out_buffer[samples_written++] = resonance * attack_envelope * decay * clamped_volume;
+      }
+
+      // Fill remainder with silence
+      for(size_t j = click_samples; j < elem_samples && samples_written < max_samples; j++) {
+        out_buffer[samples_written++] = 0.0f;
+      }
+    }
+  }
+  return samples_written;
+}
+
+// Main audio generation function - dispatches by mode
+size_t morse_audio(const MorseElement *events, size_t element_count, float *out_buffer, size_t max_samples, const MorseAudioParams *params) {
+  if(!events || !out_buffer || !params) return 0;
+  if(params->sample_rate <= 0 || params->sample_rate > 192000) return 0;
+
+  switch(params->audio_mode) {
+    case MORSE_CW:
+      return morse_audio_cw(events, element_count, out_buffer, max_samples, params);
+    case MORSE_TELEGRAPH:
+      return morse_audio_telegraph(events, element_count, out_buffer, max_samples, params);
+    default:
+      return 0; // Unknown mode
+  }
 }
 
 size_t morse_timing_size(const char *text, const MorseTimingParams *params) {

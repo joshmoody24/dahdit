@@ -20,7 +20,19 @@ export const OPT = {
   VOLUME: 3,
   WORD_GAP_MULTIPLIER: 4,
   HUMANIZATION_FACTOR: 5,
-  RANDOM_SEED: 6
+  RANDOM_SEED: 6,
+  AUDIO_MODE: 7,
+  BACKGROUND_STATIC_LEVEL: 8,
+  CLICK_SHARPNESS: 9,
+  RESONANCE_FREQ: 10,
+  DECAY_RATE: 11,
+  MECHANICAL_NOISE: 12
+};
+
+// Audio mode constants
+export const AUDIO_MODE = {
+  CW: 0,
+  TELEGRAPH: 1
 };
 
 /**
@@ -33,15 +45,34 @@ export const OPT = {
  */
 
 /**
- * @typedef {Object} MorseAudioParams
+ * @typedef {Object} MorseAudioBaseParams
  * @property {string} text - Text to convert to Morse code
  * @property {number} [wpm=20] - Words per minute
  * @property {number} [sampleRate=22050] - Audio sample rate
- * @property {number} [frequency=440] - Tone frequency in Hz
  * @property {number} [volume=0.5] - Audio volume (0.0 to 1.0)
  * @property {number} [wordGapMultiplier=1.0] - Word gap scaling factor
  * @property {number} [humanizationFactor=0.0] - Timing randomization factor (0.0-1.0)
  * @property {number} [randomSeed=0] - Random seed for reproducible humanization (0 = use time)
+ */
+
+/**
+ * @typedef {MorseAudioBaseParams & Object} MorseCWAudioParams
+ * @property {0} [audioMode] - CW audio mode
+ * @property {number} [frequency=440] - Tone frequency in Hz
+ * @property {number} [backgroundStaticLevel=0.0] - Background static level (0.0-1.0)
+ */
+
+/**
+ * @typedef {MorseAudioBaseParams & Object} MorseTelegraphAudioParams
+ * @property {1} audioMode - Telegraph audio mode (required)
+ * @property {number} [clickSharpness=0.5] - Click attack steepness (0.0-1.0, 1.0 = sharpest)
+ * @property {number} [resonanceFreq=800.0] - Mechanical resonance frequency
+ * @property {number} [decayRate=10.0] - Exponential decay rate
+ * @property {number} [mechanicalNoise=0.1] - Random variations (0.0-1.0)
+ */
+
+/**
+ * @typedef {MorseCWAudioParams | MorseTelegraphAudioParams} MorseAudioParams
  */
 
 /**
@@ -62,16 +93,47 @@ function validateTimingParams({ text, wpm, wordGapMultiplier, humanizationFactor
  * @param {MorseAudioParams} params - Parameters to validate
  * @throws {Error} If validation fails
  */
-function validateAudioParams({ text, wpm, sampleRate, frequency, volume, wordGapMultiplier, humanizationFactor, randomSeed }) {
+function validateAudioParams(params) {
+  const { text, wpm, wordGapMultiplier, humanizationFactor, randomSeed, sampleRate, volume, audioMode = AUDIO_MODE.CW } = params;
+
+  // Validate base parameters
   validateTimingParams({ text, wpm, wordGapMultiplier, humanizationFactor, randomSeed });
   if (!Number.isInteger(sampleRate) || sampleRate <= 0 || sampleRate > 192000) {
     throw new Error("Sample rate must be between 1 and 192000 Hz");
   }
-  if (typeof frequency !== 'number' || frequency <= 0 || frequency > 20000) {
-    throw new Error("Frequency must be between 1 and 20000 Hz");
-  }
   if (typeof volume !== 'number' || volume < 0 || volume > 1) {
     throw new Error("Volume must be between 0.0 and 1.0");
+  }
+  if (!Number.isInteger(audioMode) || audioMode < 0 || audioMode > 1) {
+    throw new Error("Audio mode must be 0 (CW) or 1 (Telegraph)");
+  }
+
+  // CW mode parameter validation
+  if (audioMode === AUDIO_MODE.CW) {
+    const { frequency, backgroundStaticLevel } = params;
+    if (frequency !== undefined && (typeof frequency !== 'number' || frequency <= 0 || frequency > 20000)) {
+      throw new Error("Frequency must be between 1 and 20000 Hz");
+    }
+    if (backgroundStaticLevel !== undefined && (typeof backgroundStaticLevel !== 'number' || backgroundStaticLevel < 0 || backgroundStaticLevel > 1)) {
+      throw new Error("Background static level must be between 0.0 and 1.0");
+    }
+  }
+
+  // Telegraph mode parameter validation
+  if (audioMode === AUDIO_MODE.TELEGRAPH) {
+    const { clickSharpness, resonanceFreq, decayRate, mechanicalNoise } = params;
+    if (clickSharpness !== undefined && (typeof clickSharpness !== 'number' || clickSharpness < 0 || clickSharpness > 1)) {
+      throw new Error("Click sharpness must be between 0.0 and 1.0");
+    }
+    if (resonanceFreq !== undefined && (typeof resonanceFreq !== 'number' || resonanceFreq <= 0 || resonanceFreq > 20000)) {
+      throw new Error("Resonance frequency must be between 1 and 20000 Hz");
+    }
+    if (decayRate !== undefined && (typeof decayRate !== 'number' || decayRate <= 0)) {
+      throw new Error("Decay rate must be positive");
+    }
+    if (mechanicalNoise !== undefined && (typeof mechanicalNoise !== 'number' || mechanicalNoise < 0 || mechanicalNoise > 1)) {
+      throw new Error("Mechanical noise must be between 0.0 and 1.0");
+    }
   }
 }
 
@@ -156,14 +218,25 @@ function generateMorseAudio({
   text,
   wpm = 20,
   sampleRate = 22050,
-  frequency = 440,
   volume = 0.5,
   wordGapMultiplier = 1.0,
   humanizationFactor = 0.0,
-  randomSeed = 0
+  randomSeed = 0,
+  audioMode = AUDIO_MODE.CW,
+  // CW mode parameters
+  frequency = 440,
+  backgroundStaticLevel = 0.0,
+  // Telegraph mode parameters
+  clickSharpness = 0.5,
+  resonanceFreq = 800.0,
+  decayRate = 10.0,
+  mechanicalNoise = 0.1
 }) {
   if (!module) throw new Error("WebAssembly module not loaded yet. Try awaiting ready first.");
-  validateAudioParams({ text, wpm, sampleRate, frequency, volume, wordGapMultiplier, humanizationFactor, randomSeed });
+  validateAudioParams({
+    text, wpm, sampleRate, volume, wordGapMultiplier, humanizationFactor, randomSeed, audioMode,
+    frequency, backgroundStaticLevel, clickSharpness, resonanceFreq, decayRate, mechanicalNoise
+  });
 
   const morse_new = module.cwrap("morse_new", "number", []);
   const morse_free = module.cwrap("morse_free", "void", ["number"]);
@@ -183,11 +256,22 @@ function generateMorseAudio({
 
   morse_set_i32(ctx, OPT.WPM, wpm);
   morse_set_i32(ctx, OPT.SAMPLE_RATE, sampleRate);
-  morse_set_f32(ctx, OPT.FREQ_HZ, frequency);
   morse_set_f32(ctx, OPT.VOLUME, volume);
   morse_set_f32(ctx, OPT.WORD_GAP_MULTIPLIER, wordGapMultiplier);
   morse_set_f32(ctx, OPT.HUMANIZATION_FACTOR, humanizationFactor);
   morse_set_i32(ctx, OPT.RANDOM_SEED, randomSeed);
+  morse_set_i32(ctx, OPT.AUDIO_MODE, audioMode);
+
+  // Set mode-specific parameters
+  if (audioMode === AUDIO_MODE.CW) {
+    morse_set_f32(ctx, OPT.FREQ_HZ, frequency);
+    morse_set_f32(ctx, OPT.BACKGROUND_STATIC_LEVEL, backgroundStaticLevel);
+  } else if (audioMode === AUDIO_MODE.TELEGRAPH) {
+    morse_set_f32(ctx, OPT.CLICK_SHARPNESS, clickSharpness);
+    morse_set_f32(ctx, OPT.RESONANCE_FREQ, resonanceFreq);
+    morse_set_f32(ctx, OPT.DECAY_RATE, decayRate);
+    morse_set_f32(ctx, OPT.MECHANICAL_NOISE, mechanicalNoise);
+  }
 
   // Get timing elements first
   const elementCount = morse_timing_size_ctx(ctx, text);

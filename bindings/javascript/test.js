@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { generateMorseTiming, generateMorseAudio, playMorseAudio, ready } from './morse.js';
+import { generateMorseTiming, generateMorseAudio, playMorseAudio, ready, AUDIO_MODE } from './morse.js';
 
 // Simple test framework
 let testsRun = 0;
@@ -96,6 +96,76 @@ test('large_text', () => {
     sampleRate: 8000
   });
   return result.audioData.length > 1000 && result.duration > 1.0;
+});
+
+// Test CW mode audio generation
+test('cw_mode_audio', () => {
+  const result = generateMorseAudio({
+    text: 'SOS',
+    audioMode: AUDIO_MODE.CW,
+    frequency: 600,
+    backgroundStaticLevel: 0.1,
+    sampleRate: 8000
+  });
+  return result.audioData.length > 0 && result.duration > 0;
+});
+
+// Test Telegraph mode audio generation
+test('telegraph_mode_audio', () => {
+  const result = generateMorseAudio({
+    text: 'SOS',
+    audioMode: AUDIO_MODE.TELEGRAPH,
+    clickSharpness: 0.7,
+    resonanceFreq: 1000,
+    decayRate: 15.0,
+    mechanicalNoise: 0.2,
+    sampleRate: 8000
+  });
+  return result.audioData.length > 0 && result.duration > 0;
+});
+
+// Test audio mode validation
+test('audio_mode_validation', () => {
+  try {
+    generateMorseAudio({
+      text: 'SOS',
+      audioMode: 2, // Invalid mode
+      sampleRate: 8000
+    });
+    return false; // Should have thrown
+  } catch (error) {
+    return error.message.includes('Audio mode');
+  }
+});
+
+// Test CW mode parameter validation
+test('cw_parameter_validation', () => {
+  try {
+    generateMorseAudio({
+      text: 'SOS',
+      audioMode: AUDIO_MODE.CW,
+      frequency: -100, // Invalid frequency
+      sampleRate: 8000
+    });
+    return false; // Should have thrown
+  } catch (error) {
+    return error.message.includes('Frequency');
+  }
+});
+
+// Test Telegraph mode parameter validation
+test('telegraph_parameter_validation', () => {
+  try {
+    generateMorseAudio({
+      text: 'SOS',
+      audioMode: AUDIO_MODE.TELEGRAPH,
+      clickSharpness: 1.5, // Invalid (> 1.0)
+      sampleRate: 8000
+    });
+    return false; // Should have thrown
+  } catch (error) {
+    return error.message.includes('Click sharpness');
+  }
 });
 
 console.log(`\nResults: ${testsPassed}/${testsRun} tests passed`);
