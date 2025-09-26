@@ -122,7 +122,6 @@ size_t morse_timing(MorseElement *out_elements, size_t max_elements, const char 
     // Handle prosigns in brackets [...]
     if(ch == '[') {
       i++; // Skip opening bracket
-      int prosign_start = count;
 
       // Process characters inside brackets (skip spaces and invalid chars)
       int prosign_char_count = 0;
