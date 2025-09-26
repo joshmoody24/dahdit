@@ -33,12 +33,14 @@ function generateMorseTiming({
   wpm = 20
 }) {
   if (!module) throw new Error("WebAssembly module not loaded yet. Try awaiting ready first.");
+  if (!text || typeof text !== 'string') throw new Error("Invalid text input");
+  if (!Number.isInteger(wpm) || wpm <= 0) throw new Error("WPM must be a positive integer");
 
   const morse_new = module.cwrap("morse_new", "number", []);
   const morse_free = module.cwrap("morse_free", "void", ["number"]);
   const morse_set_i32 = module.cwrap("morse_set_i32", "number", ["number", "number", "number"]);
   const morse_timing_size_ctx = module.cwrap("morse_timing_size_ctx", "number", ["number", "string"]);
-  const morse_timing_fill_ctx = module.cwrap("morse_timing_fill_ctx", "number", 
+  const morse_timing_fill_ctx = module.cwrap("morse_timing_fill_ctx", "number",
     ["number", "string", "number", "number", "number"]);
 
   // Create context and set WPM
@@ -100,6 +102,17 @@ function generateMorseAudio({
   volume = 0.5
 }) {
   if (!module) throw new Error("WebAssembly module not loaded yet. Try awaiting ready first.");
+  if (!text || typeof text !== 'string') throw new Error("Invalid text input");
+  if (!Number.isInteger(wpm) || wpm <= 0) throw new Error("WPM must be a positive integer");
+  if (!Number.isInteger(sampleRate) || sampleRate <= 0 || sampleRate > 192000) {
+    throw new Error("Sample rate must be between 1 and 192000 Hz");
+  }
+  if (typeof frequency !== 'number' || frequency <= 0 || frequency > 20000) {
+    throw new Error("Frequency must be between 1 and 20000 Hz");
+  }
+  if (typeof volume !== 'number' || volume < 0 || volume > 1) {
+    throw new Error("Volume must be between 0.0 and 1.0");
+  }
 
   const morse_new = module.cwrap("morse_new", "number", []);
   const morse_free = module.cwrap("morse_free", "void", ["number"]);
@@ -169,21 +182,36 @@ function generateMorseAudio({
  * Plays audio result using Web Audio API
  * @param {Object} audioResult - Result from generateMorseAudio
  * @returns {AudioBufferSourceNode} Audio source node
- * @throws {Error} If audioResult is invalid
+ * @throws {Error} If audioResult is invalid or Web Audio API fails
  */
 function playMorseAudio(audioResult) {
   if (!audioResult) throw new Error("No audio result provided");
+  if (!audioResult.audioData || audioResult.audioData.length === 0) {
+    throw new Error("Invalid audio data");
+  }
+  if (!audioResult.sampleRate || audioResult.sampleRate <= 0) {
+    throw new Error("Invalid sample rate");
+  }
 
-  const audioContext = new (window.AudioContext || window.webkitAudioContext)();
-  const buffer = audioContext.createBuffer(1, audioResult.audioData.length, audioResult.sampleRate);
-  buffer.copyToChannel(audioResult.audioData, 0);
+  try {
+    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContextClass) {
+      throw new Error("Web Audio API not supported in this browser");
+    }
 
-  const source = audioContext.createBufferSource();
-  source.buffer = buffer;
-  source.connect(audioContext.destination);
-  source.start();
+    const audioContext = new AudioContextClass();
+    const buffer = audioContext.createBuffer(1, audioResult.audioData.length, audioResult.sampleRate);
+    buffer.copyToChannel(audioResult.audioData, 0);
 
-  return source;
+    const source = audioContext.createBufferSource();
+    source.buffer = buffer;
+    source.connect(audioContext.destination);
+    source.start();
+
+    return source;
+  } catch (error) {
+    throw new Error(`Failed to play audio: ${error.message}`);
+  }
 }
 
 // Export individual functions for tree shaking

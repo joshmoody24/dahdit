@@ -20,6 +20,11 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Run Core Tests
+        run: |
+          cd core
+          make test
+
       - name: Setup Emscripten
         uses: mymindstorm/setup-emsdk@v14
         with:
