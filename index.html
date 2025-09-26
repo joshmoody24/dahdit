@@ -66,6 +66,23 @@
         </div>
 
         <div class="param-group">
+            <label for="wordGap">Word Gap:</label>
+            <input type="range" id="wordGap" min="50" max="300" value="100">
+            <span id="wordGap-value">1.0</span>x
+        </div>
+
+        <div class="param-group">
+            <label for="humanization">Humanization:</label>
+            <input type="range" id="humanization" min="0" max="100" value="0">
+            <span id="humanization-value">0.0</span>
+        </div>
+
+        <div class="param-group">
+            <label for="randomSeed">Random Seed:</label>
+            <input type="number" id="randomSeed" min="0" max="999999" value="0" placeholder="0 = random">
+        </div>
+
+        <div class="param-group">
             <button id="generate">Generate & Play</button>
             <button id="stop" disabled>Stop</button>
         </div>
@@ -83,12 +100,16 @@
             document.getElementById('wpm-value').textContent = document.getElementById('wpm').value;
             document.getElementById('frequency-value').textContent = document.getElementById('frequency').value;
             document.getElementById('volume-value').textContent = (document.getElementById('volume').value / 100).toFixed(1);
+            document.getElementById('wordGap-value').textContent = (document.getElementById('wordGap').value / 100).toFixed(1);
+            document.getElementById('humanization-value').textContent = (document.getElementById('humanization').value / 100).toFixed(1);
         }
 
         // Add event listeners for sliders
         document.getElementById('wpm').addEventListener('input', updateSliderDisplays);
         document.getElementById('frequency').addEventListener('input', updateSliderDisplays);
         document.getElementById('volume').addEventListener('input', updateSliderDisplays);
+        document.getElementById('wordGap').addEventListener('input', updateSliderDisplays);
+        document.getElementById('humanization').addEventListener('input', updateSliderDisplays);
 
         // Generate and play button
         document.getElementById('generate').addEventListener('click', async () => {
@@ -96,7 +117,10 @@
                 text: document.getElementById('text').value,
                 wpm: parseInt(document.getElementById('wpm').value),
                 frequency: parseInt(document.getElementById('frequency').value),
-                volume: parseFloat(document.getElementById('volume').value) / 100
+                volume: parseFloat(document.getElementById('volume').value) / 100,
+                wordGapMultiplier: parseFloat(document.getElementById('wordGap').value) / 100,
+                humanizationFactor: parseFloat(document.getElementById('humanization').value) / 100,
+                randomSeed: parseInt(document.getElementById('randomSeed').value) || 0
             };
 
             document.getElementById('status').textContent = 'Generating audio...';

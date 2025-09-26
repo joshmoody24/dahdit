@@ -1,10 +1,35 @@
 #include "morse.h"
 #include <math.h>
+#include <stdlib.h>
+#include <time.h>
 
 const float DOT_LENGTH_WPM = 1.2f;      // Standard ITU timing formula: dot duration = 1.2 / WPM seconds
 const int DOTS_PER_DASH = 3;           // ITU specification: dash = 3 dot durations
+const int DOTS_PER_CHAR_GAP = 3;       // ITU specification: inter-character gap = 3 dot durations
+const int DOTS_PER_WORD_GAP = 7;       // ITU specification: inter-word gap = 7 dot durations
 const float ATTACK_MS = 5.0f;          // Envelope attack time to prevent audio clicks
 const float RELEASE_MS = 5.0f;         // Envelope release time to prevent audio clicks
+const float HUMANIZATION_MAX_VARIANCE = 0.3f;  // Maximum timing variation as fraction of base duration
+
+// Simple humanization - adds random variation to timing with bounded output
+static float apply_humanization(float base_duration, float humanization_factor) {
+  if (humanization_factor <= 0.0f) return base_duration;
+
+  // Generate random variation: ±(humanization_factor * HUMANIZATION_MAX_VARIANCE) of base duration
+  float max_variation = base_duration * humanization_factor * HUMANIZATION_MAX_VARIANCE;
+  float variation = ((float)rand() / (float)RAND_MAX - 0.5f) * 2.0f * max_variation;
+
+  float result = base_duration + variation;
+
+  // Clamp result to safe bounds: [10% of base, base * (1 + max_variance)]
+  float min_duration = base_duration * 0.1f;
+  float max_duration = base_duration * (1.0f + humanization_factor * HUMANIZATION_MAX_VARIANCE);
+
+  if (result < min_duration) return min_duration;
+  if (result > max_duration) return max_duration;
+  return result;
+}
+
 
 // Morse code patterns using direct array indexing (O(1) lookup)
 // Pattern format: dots=0, dashes=1, terminated by -1
@@ -104,6 +129,16 @@ static size_t morse_timing_process(const char *text, const MorseTimingParams *pa
   if(!text || !params) return 0;
   if(params->wpm <= 0) return 0; // Invalid WPM
 
+  // Initialize random seed if humanization is enabled
+  if (params->humanization_factor > 0.0f) {
+    unsigned int seed = params->random_seed;
+    if (seed == 0) {
+      // Use time-based seed for true randomness
+      seed = (unsigned int)time(NULL);
+    }
+    srand(seed);
+  }
+
   float dot_sec = DOT_LENGTH_WPM / params->wpm;
   size_t count = 0;
   size_t i = 0;
@@ -117,9 +152,12 @@ static size_t morse_timing_process(const char *text, const MorseTimingParams *pa
 
     // Handle spaces as inter-word gaps
     if(ch == ' ') {
-      // Add inter-word gap (7 dot durations)
+      // Add inter-word gap (7 dot durations * word_gap_multiplier)
+      float word_gap_duration = dot_sec * DOTS_PER_WORD_GAP * params->word_gap_multiplier;
+      word_gap_duration = apply_humanization(word_gap_duration, params->humanization_factor);
+
       if(out_elements) {
-        out_elements[count] = (MorseElement){MORSE_GAP, dot_sec * 7};
+        out_elements[count] = (MorseElement){MORSE_GAP, word_gap_duration};
       }
       count++;
       i++;
@@ -146,9 +184,10 @@ static size_t morse_timing_process(const char *text, const MorseTimingParams *pa
         if(pattern) {
           // Add 1-dot gap between characters in prosign (except for first character)
           if(prosign_char_count > 0) {
+            float prosign_gap_duration = apply_humanization(dot_sec, params->humanization_factor);
             if(out_elements) {
               if(count >= max_elements) break;
-              out_elements[count] = (MorseElement){MORSE_GAP, dot_sec};
+              out_elements[count] = (MorseElement){MORSE_GAP, prosign_gap_duration};
             }
             count++;
           }
@@ -158,8 +197,9 @@ static size_t morse_timing_process(const char *text, const MorseTimingParams *pa
             if(out_elements && count >= max_elements) break;
             
             MorseElementType type = (pattern[j] == 0) ? MORSE_DOT : MORSE_DASH;
-            float duration = (type == MORSE_DOT) ? dot_sec : dot_sec * DOTS_PER_DASH;
-            
+            float base_duration = (type == MORSE_DOT) ? dot_sec : dot_sec * DOTS_PER_DASH;
+            float duration = apply_humanization(base_duration, params->humanization_factor);
+
             if(out_elements) {
               out_elements[count] = (MorseElement){type, duration};
             }
@@ -167,9 +207,10 @@ static size_t morse_timing_process(const char *text, const MorseTimingParams *pa
 
             // Add inter-element gap (except after last element)
             if(pattern[j+1] != -1) {
+              float gap_duration = apply_humanization(dot_sec, params->humanization_factor);
               if(out_elements) {
                 if(count >= max_elements) break;
-                out_elements[count] = (MorseElement){MORSE_GAP, dot_sec};
+                out_elements[count] = (MorseElement){MORSE_GAP, gap_duration};
               }
               count++;
             }
@@ -198,9 +239,10 @@ static size_t morse_timing_process(const char *text, const MorseTimingParams *pa
           }
           
           if(should_add_gap) {
+            float inter_char_duration = apply_humanization(dot_sec * DOTS_PER_CHAR_GAP, params->humanization_factor);
             if(out_elements) {
               if(count >= max_elements) break;
-              out_elements[count] = (MorseElement){MORSE_GAP, dot_sec * 3};
+              out_elements[count] = (MorseElement){MORSE_GAP, inter_char_duration};
             }
             count++;
           }
@@ -211,8 +253,9 @@ static size_t morse_timing_process(const char *text, const MorseTimingParams *pa
           if(out_elements && count >= max_elements) break;
           
           MorseElementType type = (pattern[j] == 0) ? MORSE_DOT : MORSE_DASH;
-          float duration = (type == MORSE_DOT) ? dot_sec : dot_sec * DOTS_PER_DASH;
-          
+          float base_duration = (type == MORSE_DOT) ? dot_sec : dot_sec * DOTS_PER_DASH;
+          float duration = apply_humanization(base_duration, params->humanization_factor);
+
           if(out_elements) {
             out_elements[count] = (MorseElement){type, duration};
           }
@@ -220,9 +263,10 @@ static size_t morse_timing_process(const char *text, const MorseTimingParams *pa
 
           // Add inter-element gap (except after last element)
           if(pattern[j+1] != -1) {
+            float gap_duration = apply_humanization(dot_sec, params->humanization_factor);
             if(out_elements) {
               if(count >= max_elements) break;
-              out_elements[count] = (MorseElement){MORSE_GAP, dot_sec};
+              out_elements[count] = (MorseElement){MORSE_GAP, gap_duration};
             }
             count++;
           }
