@@ -29,7 +29,11 @@ typedef struct {
 
 size_t morse_timing(MorseElement *out_elements, size_t max_elements, const char *text, const MorseTimingParams *params);
 
+size_t morse_timing_size(const char *text, const MorseTimingParams *params);
+
 size_t morse_audio(const MorseElement *events, size_t element_count, float *out_buffer, size_t max_samples, const MorseAudioParams *params);
+
+size_t morse_audio_size(const MorseElement *events, size_t element_count, const MorseAudioParams *params);
 
 int write_wav_file(const char *filename, const float *samples, size_t sample_count, int sample_rate);
 
