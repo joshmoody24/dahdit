@@ -99,22 +99,28 @@ static const int* morse_patterns[256] = {
   ['"'] = pattern_dquote, ['$'] = pattern_dollar, ['@'] = pattern_at
 };
 
-size_t morse_timing(MorseElement *out_elements, size_t max_elements, const char *text, const MorseTimingParams *params) {
-  if(!out_elements || !text || !params) return 0;
+// Internal function for processing morse text - shared by timing and size functions
+static size_t morse_timing_process(const char *text, const MorseTimingParams *params, MorseElement *out_elements, size_t max_elements) {
+  if(!text || !params) return 0;
 
   float dot_sec = DOT_LENGTH_WPM / params->wpm;
   size_t count = 0;
   size_t i = 0;
 
-  while(text[i] && count < max_elements) {
+  while(text[i]) {
+    // For size-only mode, continue processing even when out_elements is NULL
+    // For timing mode, stop when buffer is full
+    if(out_elements && count >= max_elements) break;
+    
     char ch = text[i];
 
     // Handle spaces as inter-word gaps
     if(ch == ' ') {
       // Add inter-word gap (7 dot durations)
-      if(count < max_elements) {
-        out_elements[count++] = (MorseElement){MORSE_GAP, dot_sec * 7};
+      if(out_elements) {
+        out_elements[count] = (MorseElement){MORSE_GAP, dot_sec * 7};
       }
+      count++;
       i++;
       continue;
     }
@@ -125,7 +131,7 @@ size_t morse_timing(MorseElement *out_elements, size_t max_elements, const char 
 
       // Process characters inside brackets (skip spaces and invalid chars)
       int prosign_char_count = 0;
-      while(text[i] && text[i] != ']' && count < max_elements) {
+      while(text[i] && text[i] != ']') {
         char prosign_ch = text[i];
 
         // Skip spaces inside prosigns
@@ -138,19 +144,31 @@ size_t morse_timing(MorseElement *out_elements, size_t max_elements, const char 
 
         if(pattern) {
           // Add 1-dot gap between characters in prosign (except for first character)
-          if(prosign_char_count > 0 && count < max_elements) {
-            out_elements[count++] = (MorseElement){MORSE_GAP, dot_sec};
+          if(prosign_char_count > 0) {
+            if(out_elements && count < max_elements) {
+              out_elements[count] = (MorseElement){MORSE_GAP, dot_sec};
+            }
+            count++;
           }
 
           // Add pattern elements
-          for(int j = 0; pattern[j] != -1 && count < max_elements; j++) {
+          for(int j = 0; pattern[j] != -1; j++) {
+            if(out_elements && count >= max_elements) break;
+            
             MorseElementType type = (pattern[j] == 0) ? MORSE_DOT : MORSE_DASH;
             float duration = (type == MORSE_DOT) ? dot_sec : dot_sec * DOTS_PER_DASH;
-            out_elements[count++] = (MorseElement){type, duration};
+            
+            if(out_elements) {
+              out_elements[count] = (MorseElement){type, duration};
+            }
+            count++;
 
             // Add inter-element gap (except after last element)
-            if(pattern[j+1] != -1 && count < max_elements) {
-              out_elements[count++] = (MorseElement){MORSE_GAP, dot_sec};
+            if(pattern[j+1] != -1) {
+              if(out_elements && count < max_elements) {
+                out_elements[count] = (MorseElement){MORSE_GAP, dot_sec};
+              }
+              count++;
             }
           }
           prosign_char_count++;
@@ -169,19 +187,39 @@ size_t morse_timing(MorseElement *out_elements, size_t max_elements, const char 
 
       if(pattern) {
         // Add inter-character gap if not the first character
-        if(count > 0 && out_elements[count-1].type != MORSE_GAP && count < max_elements) {
-          out_elements[count++] = (MorseElement){MORSE_GAP, dot_sec * 3};
+        if(count > 0) {
+          // Check if last element was not already a gap to avoid duplicate gaps
+          int should_add_gap = 1;
+          if(out_elements && count > 0) {
+            should_add_gap = (out_elements[count-1].type != MORSE_GAP);
+          }
+          
+          if(should_add_gap) {
+            if(out_elements && count < max_elements) {
+              out_elements[count] = (MorseElement){MORSE_GAP, dot_sec * 3};
+            }
+            count++;
+          }
         }
 
         // Add pattern elements
-        for(int j = 0; pattern[j] != -1 && count < max_elements; j++) {
+        for(int j = 0; pattern[j] != -1; j++) {
+          if(out_elements && count >= max_elements) break;
+          
           MorseElementType type = (pattern[j] == 0) ? MORSE_DOT : MORSE_DASH;
           float duration = (type == MORSE_DOT) ? dot_sec : dot_sec * DOTS_PER_DASH;
-          out_elements[count++] = (MorseElement){type, duration};
+          
+          if(out_elements) {
+            out_elements[count] = (MorseElement){type, duration};
+          }
+          count++;
 
           // Add inter-element gap (except after last element)
-          if(pattern[j+1] != -1 && count < max_elements) {
-            out_elements[count++] = (MorseElement){MORSE_GAP, dot_sec};
+          if(pattern[j+1] != -1) {
+            if(out_elements && count < max_elements) {
+              out_elements[count] = (MorseElement){MORSE_GAP, dot_sec};
+            }
+            count++;
           }
         }
       }
@@ -190,6 +228,11 @@ size_t morse_timing(MorseElement *out_elements, size_t max_elements, const char 
   }
 
   return count;
+}
+
+size_t morse_timing(MorseElement *out_elements, size_t max_elements, const char *text, const MorseTimingParams *params) {
+  if(!out_elements) return 0;
+  return morse_timing_process(text, params, out_elements, max_elements);
 }
 
 size_t morse_audio(const MorseElement *events, size_t element_count, float *out_buffer, size_t max_samples, const MorseAudioParams *params) {
@@ -242,88 +285,7 @@ size_t morse_audio(const MorseElement *events, size_t element_count, float *out_
 }
 
 size_t morse_timing_size(const char *text, const MorseTimingParams *params) {
-  if(!text || !params) return 0;
-
-  size_t count = 0;
-  size_t i = 0;
-
-  while(text[i]) {
-    char ch = text[i];
-
-    // Handle spaces as inter-word gaps
-    if(ch == ' ') {
-      count++; // Inter-word gap
-      i++;
-      continue;
-    }
-
-    // Handle prosigns in brackets [...]
-    if(ch == '[') {
-      i++; // Skip opening bracket
-
-      // Process characters inside brackets (skip spaces and invalid chars)
-      int prosign_char_count = 0;
-      while(text[i] && text[i] != ']') {
-        char prosign_ch = text[i];
-
-        // Skip spaces inside prosigns
-        if(prosign_ch == ' ') {
-          i++;
-          continue;
-        }
-
-        const int* pattern = morse_patterns[(unsigned char)prosign_ch];
-
-        if(pattern) {
-          // Add 1-dot gap between characters in prosign (except for first character)
-          if(prosign_char_count > 0) {
-            count++;
-          }
-
-          // Add pattern elements
-          for(int j = 0; pattern[j] != -1; j++) {
-            count++; // Count the element (dot or dash)
-
-            // Add inter-element gap (except after last element)
-            if(pattern[j+1] != -1) {
-              count++;
-            }
-          }
-          prosign_char_count++;
-        }
-        i++;
-      }
-
-      // Skip closing bracket
-      if(text[i] == ']') {
-        i++;
-      }
-
-    } else {
-      // Handle regular character
-      const int* pattern = morse_patterns[(unsigned char)ch];
-
-      if(pattern) {
-        // Add inter-character gap if not the first character
-        if(count > 0) {
-          count++;
-        }
-
-        // Add pattern elements
-        for(int j = 0; pattern[j] != -1; j++) {
-          count++; // Count the element (dot or dash)
-
-          // Add inter-element gap (except after last element)
-          if(pattern[j+1] != -1) {
-            count++;
-          }
-        }
-      }
-      i++;
-    }
-  }
-
-  return count;
+  return morse_timing_process(text, params, NULL, 0);
 }
 
 size_t morse_audio_size(const MorseElement *events, size_t element_count, const MorseAudioParams *params) {
