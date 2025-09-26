@@ -2,6 +2,7 @@
 *.o
 
 core/morse
+core/test-runner
 
 bindings/javascript/morse-wasm.wasm
 bindings/javascript/morse-wasm.js
