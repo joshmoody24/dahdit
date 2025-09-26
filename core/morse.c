@@ -241,3 +241,100 @@ size_t morse_audio(const MorseElement *events, size_t element_count, float *out_
   return samples_written;
 }
 
+size_t morse_timing_size(const char *text, const MorseTimingParams *params) {
+  if(!text || !params) return 0;
+
+  size_t count = 0;
+  size_t i = 0;
+
+  while(text[i]) {
+    char ch = text[i];
+
+    // Handle spaces as inter-word gaps
+    if(ch == ' ') {
+      count++; // Inter-word gap
+      i++;
+      continue;
+    }
+
+    // Handle prosigns in brackets [...]
+    if(ch == '[') {
+      i++; // Skip opening bracket
+
+      // Process characters inside brackets (skip spaces and invalid chars)
+      int prosign_char_count = 0;
+      while(text[i] && text[i] != ']') {
+        char prosign_ch = text[i];
+
+        // Skip spaces inside prosigns
+        if(prosign_ch == ' ') {
+          i++;
+          continue;
+        }
+
+        const int* pattern = morse_patterns[(unsigned char)prosign_ch];
+
+        if(pattern) {
+          // Add 1-dot gap between characters in prosign (except for first character)
+          if(prosign_char_count > 0) {
+            count++;
+          }
+
+          // Add pattern elements
+          for(int j = 0; pattern[j] != -1; j++) {
+            count++; // Count the element (dot or dash)
+
+            // Add inter-element gap (except after last element)
+            if(pattern[j+1] != -1) {
+              count++;
+            }
+          }
+          prosign_char_count++;
+        }
+        i++;
+      }
+
+      // Skip closing bracket
+      if(text[i] == ']') {
+        i++;
+      }
+
+    } else {
+      // Handle regular character
+      const int* pattern = morse_patterns[(unsigned char)ch];
+
+      if(pattern) {
+        // Add inter-character gap if not the first character
+        if(count > 0) {
+          count++;
+        }
+
+        // Add pattern elements
+        for(int j = 0; pattern[j] != -1; j++) {
+          count++; // Count the element (dot or dash)
+
+          // Add inter-element gap (except after last element)
+          if(pattern[j+1] != -1) {
+            count++;
+          }
+        }
+      }
+      i++;
+    }
+  }
+
+  return count;
+}
+
+size_t morse_audio_size(const MorseElement *events, size_t element_count, const MorseAudioParams *params) {
+  if(!events || !params) return 0;
+
+  size_t total_samples = 0;
+  for(size_t i = 0; i < element_count; i++) {
+    const MorseElement *elem = &events[i];
+    size_t elem_samples = (size_t)(elem->duration_seconds * params->sample_rate);
+    total_samples += elem_samples;
+  }
+  return total_samples;
+}
+

@@ -5,10 +5,20 @@ import MorseWasmModule from './morse-wasm.js';
 let module = null;
 
 // Optional promise for users who want to ensure module is loaded
-export const ready = MorseWasmModule().then(loadedModule => {
+export const ready = MorseWasmModule({
+  locateFile: name => new URL(name, import.meta.url).href
+}).then(loadedModule => {
   module = loadedModule;
   return loadedModule;
 });
+
+// Option keys enum mirror for convenience
+export const OPT = {
+  WPM: 0,
+  SAMPLE_RATE: 1,
+  FREQ_HZ: 2,
+  VOLUME: 3
+};
 
 /**
  * Generates Morse code timing elements from text
@@ -24,32 +34,38 @@ function generateMorseTiming({
 }) {
   if (!module) throw new Error("WebAssembly module not loaded yet. Try awaiting ready first.");
 
-  const morse_timing = module.cwrap("morse_timing", "number",
-    ["number", "number", "string", "number"]);
+  const morse_new = module.cwrap("morse_new", "number", []);
+  const morse_free = module.cwrap("morse_free", "void", ["number"]);
+  const morse_set_i32 = module.cwrap("morse_set_i32", "number", ["number", "number", "number"]);
+  const morse_timing_size_ctx = module.cwrap("morse_timing_size_ctx", "number", ["number", "string"]);
+  const morse_timing_fill_ctx = module.cwrap("morse_timing_fill_ctx", "number", 
+    ["number", "string", "number", "number", "number"]);
 
-  // Allocate timing params struct
-  const timingParamsPtr = module._malloc(4); // int wpm
-  module.HEAP32[timingParamsPtr >> 2] = wpm;
+  // Create context and set WPM
+  const ctx = morse_new();
+  if (!ctx) throw new Error("Failed to create Morse context");
 
-  // Calculate max elements needed (worst case: ~10 elements per character)
-  const maxElements = text.length * 10;
-  const elementsPtr = module._malloc(maxElements * 8); // MorseElement is 8 bytes (int + float)
+  morse_set_i32(ctx, OPT.WPM, wpm);
 
-  // Generate timing
-  const elementCount = morse_timing(elementsPtr, maxElements, text, timingParamsPtr);
-
+  // Get exact size needed
+  const elementCount = morse_timing_size_ctx(ctx, text);
   if (elementCount === 0) {
-    module._free(timingParamsPtr);
-    module._free(elementsPtr);
+    morse_free(ctx);
     throw new Error("Failed to generate Morse timing");
   }
 
-  // Convert C structs to JavaScript objects
+  // Allocate arrays for results
+  const typesPtr = module._malloc(elementCount * 4); // int array
+  const dursPtr = module._malloc(elementCount * 4);  // float array
+
+  // Fill arrays
+  const actualCount = morse_timing_fill_ctx(ctx, text, typesPtr, dursPtr, elementCount);
+
+  // Convert to JavaScript objects
   const elements = [];
-  for (let i = 0; i < elementCount; i++) {
-    const elemPtr = elementsPtr + i * 8;
-    const type = module.HEAP32[elemPtr >> 2]; // MorseElementType (int)
-    const duration = module.HEAPF32[(elemPtr + 4) >> 2]; // duration_seconds (float)
+  for (let i = 0; i < actualCount; i++) {
+    const type = module.HEAP32[(typesPtr >> 2) + i];
+    const duration = module.HEAPF32[(dursPtr >> 2) + i];
 
     elements.push({
       type: type === 0 ? "dot" : type === 1 ? "dash" : "gap",
@@ -58,8 +74,9 @@ function generateMorseTiming({
   }
 
   // Cleanup
-  module._free(timingParamsPtr);
-  module._free(elementsPtr);
+  module._free(typesPtr);
+  module._free(dursPtr);
+  morse_free(ctx);
 
   return elements;
 }
@@ -84,60 +101,62 @@ function generateMorseAudio({
 }) {
   if (!module) throw new Error("WebAssembly module not loaded yet. Try awaiting ready first.");
 
-  const morse_timing = module.cwrap("morse_timing", "number",
-    ["number", "number", "string", "number"]);
-  const morse_audio = module.cwrap("morse_audio", "number",
-    ["number", "number", "number", "number", "number"]);
+  const morse_new = module.cwrap("morse_new", "number", []);
+  const morse_free = module.cwrap("morse_free", "void", ["number"]);
+  const morse_set_i32 = module.cwrap("morse_set_i32", "number", ["number", "number", "number"]);
+  const morse_set_f32 = module.cwrap("morse_set_f32", "number", ["number", "number", "number"]);
+  const morse_timing_size_ctx = module.cwrap("morse_timing_size_ctx", "number", ["number", "string"]);
+  const morse_timing_fill_ctx = module.cwrap("morse_timing_fill_ctx", "number", 
+    ["number", "string", "number", "number", "number"]);
+  const morse_audio_size_ctx = module.cwrap("morse_audio_size_ctx", "number", 
+    ["number", "number", "number", "number"]);
+  const morse_audio_fill_ctx = module.cwrap("morse_audio_fill_ctx", "number", 
+    ["number", "number", "number", "number", "number", "number"]);
 
-  // Allocate timing params struct
-  const timingParamsPtr = module._malloc(4); // int wpm
-  module.HEAP32[timingParamsPtr >> 2] = wpm;
+  // Create context and set all parameters
+  const ctx = morse_new();
+  if (!ctx) throw new Error("Failed to create Morse context");
 
-  // Calculate max elements needed (worst case: ~10 elements per character)
-  const maxElements = text.length * 10;
-  const elementsPtr = module._malloc(maxElements * 8); // MorseElement is 8 bytes (int + float)
+  morse_set_i32(ctx, OPT.WPM, wpm);
+  morse_set_i32(ctx, OPT.SAMPLE_RATE, sampleRate);
+  morse_set_f32(ctx, OPT.FREQ_HZ, frequency);
+  morse_set_f32(ctx, OPT.VOLUME, volume);
 
-  // Generate timing
-  const elementCount = morse_timing(elementsPtr, maxElements, text, timingParamsPtr);
-
+  // Get timing elements first
+  const elementCount = morse_timing_size_ctx(ctx, text);
   if (elementCount === 0) {
-    module._free(timingParamsPtr);
-    module._free(elementsPtr);
+    morse_free(ctx);
     throw new Error("Failed to generate Morse timing");
   }
 
-  // Calculate total duration from actual elements
+  const typesPtr = module._malloc(elementCount * 4); // int array
+  const dursPtr = module._malloc(elementCount * 4);  // float array
+
+  const actualCount = morse_timing_fill_ctx(ctx, text, typesPtr, dursPtr, elementCount);
+
+  // Calculate total duration
   let totalDuration = 0;
-  for (let i = 0; i < elementCount; i++) {
-    const elemPtr = elementsPtr + i * 8;
-    const duration = module.HEAPF32[(elemPtr + 4) >> 2]; // duration_seconds is at offset 4
-    totalDuration += duration;
+  for (let i = 0; i < actualCount; i++) {
+    totalDuration += module.HEAPF32[(dursPtr >> 2) + i];
   }
 
-  // Allocate audio buffer based on actual duration
-  const maxSamples = Math.ceil(totalDuration * sampleRate);
-  const audioBufferPtr = module._malloc(maxSamples * 4); // float array
+  // Get audio size and fill
+  const audioSize = morse_audio_size_ctx(ctx, typesPtr, dursPtr, actualCount);
+  const samplesPtr = module._malloc(audioSize * 4); // float array
 
-  // Allocate audio params struct
-  const audioParamsPtr = module._malloc(12); // int + float + float
-  module.HEAP32[audioParamsPtr >> 2] = sampleRate;
-  module.HEAPF32[(audioParamsPtr + 4) >> 2] = frequency;
-  module.HEAPF32[(audioParamsPtr + 8) >> 2] = volume;
-
-  // Generate audio
-  const samplesGenerated = morse_audio(elementsPtr, elementCount, audioBufferPtr, maxSamples, audioParamsPtr);
+  const samplesGenerated = morse_audio_fill_ctx(ctx, typesPtr, dursPtr, actualCount, samplesPtr, audioSize);
 
   // Copy audio data to JavaScript array
   const audioData = new Float32Array(samplesGenerated);
   for (let i = 0; i < samplesGenerated; i++) {
-    audioData[i] = module.HEAPF32[(audioBufferPtr >> 2) + i];
+    audioData[i] = module.HEAPF32[(samplesPtr >> 2) + i];
   }
 
   // Cleanup
-  module._free(timingParamsPtr);
-  module._free(elementsPtr);
-  module._free(audioBufferPtr);
-  module._free(audioParamsPtr);
+  module._free(typesPtr);
+  module._free(dursPtr);
+  module._free(samplesPtr);
+  morse_free(ctx);
 
   return {
     audioData,
