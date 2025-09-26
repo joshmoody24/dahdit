@@ -1,6 +1,6 @@
 CC = emcc
 CFLAGS = -O3 -s WASM=1 -s EXPORTED_FUNCTIONS='["_morse_new", "_morse_free", "_morse_set_i32", "_morse_set_f32", "_morse_set_str", "_morse_timing_size_ctx", "_morse_timing_fill_ctx", "_morse_audio_size_ctx", "_morse_audio_fill_ctx", "_malloc", "_free"]' \
-         -s EXPORTED_RUNTIME_METHODS='["ccall", "cwrap", "HEAPU8", "HEAPF32", "HEAP32"]' \
+         -s EXPORTED_RUNTIME_METHODS='["ccall", "cwrap"]' \
          -s ALLOW_MEMORY_GROWTH=1 -s MODULARIZE=1 -s EXPORT_NAME="MorseWasmModule" \
          -s EXPORT_ES6=1
 
