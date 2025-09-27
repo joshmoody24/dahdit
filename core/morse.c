@@ -3,6 +3,10 @@
 #include <stdlib.h>
 #include <time.h>
 
+#ifndef M_SQRT2
+#define M_SQRT2 1.41421356237309504880
+#endif
+
 const float DOT_LENGTH_WPM = 1.2f;      // Standard ITU timing formula: dot duration = 1.2 / WPM seconds
 const int DOTS_PER_DASH = 3;           // ITU specification: dash = 3 dot durations
 const int DOTS_PER_CHAR_GAP = 3;       // ITU specification: inter-character gap = 3 dot durations
@@ -20,6 +24,171 @@ const float TELEGRAPH_MAX_SHARPNESS = 1000.0f;      // Maximum attack sharpness 
 static float generate_white_noise(void) {
   // Simple white noise using rand() - normalized to [-1, 1]
   return (2.0f * (float)rand() / (float)RAND_MAX) - 1.0f;
+}
+
+// Generate more natural room tone (filtered/colored noise)
+static float generate_room_tone(void) {
+  // Layer multiple noise sources for more natural sound
+  static float prev_sample = 0.0f;
+
+  // White noise base
+  float white = generate_white_noise() * 0.6f;
+
+  // Add some low-frequency content (simple 1-pole lowpass)
+  float alpha = 0.02f; // Very gentle filtering
+  prev_sample = prev_sample * (1.0f - alpha) + white * alpha;
+
+  // Mix white noise with filtered version for warmth
+  return white * 0.3f + prev_sample * 0.7f;
+}
+
+// Apply reverb/echo effect to a signal
+static float apply_reverb(float signal, float t, float reverb_amount, float decay_factor,
+                         float sharpness_factor, float sharpness_multiplier, float volume_multiplier) {
+  if (reverb_amount <= 0.0f) return 0.0f;
+
+  float echo_delay = 0.025f;
+  if (t < echo_delay) return 0.0f;
+
+  float echo_t = t - echo_delay;
+  float echo_decay = expf(-echo_t * decay_factor * 1.3f);
+  float echo_amplitude = reverb_amount * 0.5f;
+  float echo_attack = expf(-echo_t * sharpness_factor * sharpness_multiplier);
+
+  return signal * echo_attack * echo_decay * volume_multiplier * echo_amplitude;
+}
+
+// Calculate pitch variation with mechanical noise
+static float calculate_pitch_variation(float base_freq, float mechanical_noise, float freq_multiplier) {
+  float pitch_variation = 1.0f;
+  if (mechanical_noise > 0.0f) {
+    float noise = (generate_white_noise() * 2.0f - 1.0f); // -1 to 1
+    pitch_variation = 1.0f + noise * mechanical_noise * 0.05f; // ±5% max variation
+  }
+  return base_freq * pitch_variation * freq_multiplier;
+}
+
+// Generate composite resonance signal
+static float generate_resonance_signal(float t, float base_freq, float freq_multiplier) {
+  // Primary resonance
+  float primary_resonance = sinf(2.0f * M_PI * base_freq * t);
+
+  // Secondary resonance at higher frequency (harmonic)
+  float secondary_freq = base_freq * 2.3f; // Not exactly harmonic for realism
+  float secondary_amplitude = (freq_multiplier == 1.0f) ? 0.4f : 0.3f;
+  float secondary_resonance = sinf(2.0f * M_PI * secondary_freq * t) * secondary_amplitude;
+
+  // Tertiary resonance at lower frequency (fundamental mechanical)
+  float tertiary_freq = base_freq * 0.6f;
+  float tertiary_amplitude = (freq_multiplier == 1.0f) ? 0.25f : 0.2f;
+  float tertiary_resonance = sinf(2.0f * M_PI * tertiary_freq * t) * tertiary_amplitude;
+
+  // High-frequency overtones
+  float overtone1 = sinf(2.0f * M_PI * base_freq * 3.7f * t) * 0.15f;
+  float overtone2 = sinf(2.0f * M_PI * base_freq * 5.1f * t) * 0.1f;
+
+  // Lower frequency body resonance
+  float body_resonance = sinf(2.0f * M_PI * base_freq * 0.4f * t) * 0.2f;
+
+  return primary_resonance + secondary_resonance + tertiary_resonance +
+         overtone1 + overtone2 + body_resonance;
+}
+
+// Generate a single telegraph click with configurable characteristics
+static float generate_telegraph_click(float t, const MorseTelegraphParams *telegraph,
+                                     float freq_multiplier, float sharpness_multiplier,
+                                     float volume_multiplier) {
+  // Calculate envelope and decay parameters
+  float sharpness_factor = TELEGRAPH_MAX_SHARPNESS -
+                          telegraph->click_sharpness * (TELEGRAPH_MAX_SHARPNESS - TELEGRAPH_MIN_SHARPNESS);
+  float attack_envelope = expf(-t * sharpness_factor * sharpness_multiplier);
+
+  float freq_factor = telegraph->resonance_freq / 1000.0f;
+  float solenoid_decay_factor = telegraph->decay_rate * (1.0f + freq_factor * telegraph->solenoid_response);
+  float decay = expf(-t * solenoid_decay_factor);
+
+  // Generate resonance signal with pitch variations
+  float varied_freq = calculate_pitch_variation(telegraph->resonance_freq, telegraph->mechanical_noise, freq_multiplier);
+  float signal = generate_resonance_signal(t, varied_freq, freq_multiplier);
+
+  // Apply envelopes and volume
+  float base_signal = signal * attack_envelope * decay * volume_multiplier;
+
+  // Add reverb/echo effect
+  float reverb_signal = apply_reverb(signal, t, telegraph->reverb_amount, solenoid_decay_factor,
+                                   sharpness_factor, sharpness_multiplier, volume_multiplier);
+
+  return base_signal + reverb_signal;
+}
+
+// Simple biquad filter coefficients structure
+typedef struct {
+  float a0, a1, a2, b1, b2;
+  float x1, x2, y1, y2;  // State variables
+} BiquadFilter;
+
+// Initialize low-pass filter (2nd order Butterworth)
+static void init_lowpass_filter(BiquadFilter* filter, float cutoff_freq, float sample_rate) {
+  if (cutoff_freq >= sample_rate * 0.49f) {
+    // Bypass filter if cutoff is too high
+    filter->a0 = 1.0f; filter->a1 = 0.0f; filter->a2 = 0.0f;
+    filter->b1 = 0.0f; filter->b2 = 0.0f;
+  } else {
+    float w = 2.0f * M_PI * cutoff_freq / sample_rate;
+    float cos_w = cosf(w);
+    float sin_w = sinf(w);
+    float alpha = sin_w / M_SQRT2;  // Q = 0.707 for Butterworth
+
+    float norm = 1.0f + alpha;
+    filter->a0 = (1.0f - cos_w) / (2.0f * norm);
+    filter->a1 = (1.0f - cos_w) / norm;
+    filter->a2 = filter->a0;
+    filter->b1 = -2.0f * cos_w / norm;
+    filter->b2 = (1.0f - alpha) / norm;
+  }
+  filter->x1 = filter->x2 = filter->y1 = filter->y2 = 0.0f;
+}
+
+// Initialize high-pass filter (2nd order Butterworth)
+static void init_highpass_filter(BiquadFilter* filter, float cutoff_freq, float sample_rate) {
+  if (cutoff_freq <= 1.0f) {
+    // Bypass filter if cutoff is too low
+    filter->a0 = 1.0f; filter->a1 = 0.0f; filter->a2 = 0.0f;
+    filter->b1 = 0.0f; filter->b2 = 0.0f;
+  } else {
+    float w = 2.0f * M_PI * cutoff_freq / sample_rate;
+    float cos_w = cosf(w);
+    float sin_w = sinf(w);
+    float alpha = sin_w / M_SQRT2;  // Q = 0.707 for Butterworth
+
+    float norm = 1.0f + alpha;
+    filter->a0 = (1.0f + cos_w) / (2.0f * norm);
+    filter->a1 = -(1.0f + cos_w) / norm;
+    filter->a2 = filter->a0;
+    filter->b1 = -2.0f * cos_w / norm;
+    filter->b2 = (1.0f - alpha) / norm;
+  }
+  filter->x1 = filter->x2 = filter->y1 = filter->y2 = 0.0f;
+}
+
+// Process single sample through biquad filter
+static float process_biquad(BiquadFilter* filter, float input) {
+  float output = filter->a0 * input + filter->a1 * filter->x1 + filter->a2 * filter->x2
+                 - filter->b1 * filter->y1 - filter->b2 * filter->y2;
+
+  // Update state
+  filter->x2 = filter->x1;
+  filter->x1 = input;
+  filter->y2 = filter->y1;
+  filter->y1 = output;
+
+  return output;
+}
+
+// Apply high-pass and low-pass filters in sequence
+static float apply_filters(float signal, BiquadFilter *highpass, BiquadFilter *lowpass) {
+  float filtered = process_biquad(highpass, signal);
+  return process_biquad(lowpass, filtered);
 }
 
 // Waveform generation functions
@@ -331,6 +500,11 @@ static size_t morse_audio_radio(const MorseElement *events, size_t element_count
 
   float clamped_volume = params->volume < 0.0f ? 0.0f : (params->volume > 1.0f ? 1.0f : params->volume);
 
+  // Initialize filters
+  BiquadFilter lowpass, highpass;
+  init_lowpass_filter(&lowpass, params->low_pass_cutoff, (float)params->sample_rate);
+  init_highpass_filter(&highpass, params->high_pass_cutoff, (float)params->sample_rate);
+
   size_t samples_written = 0;
   for(size_t i = 0; i < element_count && samples_written < max_samples; i++) {
     const MorseElement *elem = &events[i];
@@ -345,7 +519,8 @@ static size_t morse_audio_radio(const MorseElement *events, size_t element_count
           signal = generate_white_noise() * radio->background_static_level * clamped_volume;
         }
 
-        out_buffer[samples_written++] = signal;
+        // Apply filters
+        out_buffer[samples_written++] = apply_filters(signal, &highpass, &lowpass);
       }
     } else {
       size_t attack_samples = (size_t)((ATTACK_MS / 1000.0f) * params->sample_rate);
@@ -370,7 +545,8 @@ static size_t morse_audio_radio(const MorseElement *events, size_t element_count
           signal += generate_white_noise() * radio->background_static_level * clamped_volume;
         }
 
-        out_buffer[samples_written++] = signal;
+        // Apply filters
+        out_buffer[samples_written++] = apply_filters(signal, &highpass, &lowpass);
       }
 
       // Sustain phase
@@ -384,7 +560,8 @@ static size_t morse_audio_radio(const MorseElement *events, size_t element_count
           signal += generate_white_noise() * radio->background_static_level * clamped_volume;
         }
 
-        out_buffer[samples_written++] = signal;
+        // Apply filters
+        out_buffer[samples_written++] = apply_filters(signal, &highpass, &lowpass);
       }
 
       // Release phase
@@ -399,7 +576,8 @@ static size_t morse_audio_radio(const MorseElement *events, size_t element_count
           signal += generate_white_noise() * radio->background_static_level * clamped_volume;
         }
 
-        out_buffer[samples_written++] = signal;
+        // Apply filters
+        out_buffer[samples_written++] = apply_filters(signal, &highpass, &lowpass);
       }
     }
   }
@@ -411,6 +589,11 @@ static size_t morse_audio_telegraph(const MorseElement *events, size_t element_c
   const MorseTelegraphParams *telegraph = &params->mode_params.telegraph;
   float clamped_volume = params->volume < 0.0f ? 0.0f : (params->volume > 1.0f ? 1.0f : params->volume);
 
+  // Initialize filters
+  BiquadFilter lowpass, highpass;
+  init_lowpass_filter(&lowpass, params->low_pass_cutoff, (float)params->sample_rate);
+  init_highpass_filter(&highpass, params->high_pass_cutoff, (float)params->sample_rate);
+
   size_t samples_written = 0;
   for(size_t i = 0; i < element_count && samples_written < max_samples; i++) {
     const MorseElement *elem = &events[i];
@@ -421,63 +604,38 @@ static size_t morse_audio_telegraph(const MorseElement *events, size_t element_c
       for(size_t j = 0; j < elem_samples && samples_written < max_samples; j++) {
         float room_tone = 0.0f;
         if (telegraph->room_tone_level > 0.0f) {
-          room_tone = generate_white_noise() * telegraph->room_tone_level * clamped_volume * 0.1f; // Very subtle
+          room_tone = generate_room_tone() * telegraph->room_tone_level * clamped_volume * 0.1f; // Very subtle
         }
-        out_buffer[samples_written++] = room_tone;
+        out_buffer[samples_written++] = apply_filters(room_tone, &highpass, &lowpass);
       }
     } else {
-      // Generate click at start of dot/dash
+      // Generate key-down click at start and key-up click at end
       size_t click_samples = (size_t)(TELEGRAPH_CLICK_DURATION_SEC * params->sample_rate);
-      if(click_samples > elem_samples) click_samples = elem_samples;
+      if(click_samples > elem_samples / 2) click_samples = elem_samples / 2; // Leave room for both clicks
 
+      // Key-down click at start
       for(size_t j = 0; j < click_samples && samples_written < max_samples; j++) {
         float t = (float)j / params->sample_rate;
-
-        // Sharp attack followed by resonant decay
-        // Map 0-1 sharpness to exponential range
-        float sharpness_factor = TELEGRAPH_MIN_SHARPNESS +
-                                telegraph->click_sharpness * (TELEGRAPH_MAX_SHARPNESS - TELEGRAPH_MIN_SHARPNESS);
-        float attack_envelope = expf(-t * sharpness_factor);
-
-        // Multiple resonant frequencies layered for realism
-        float signal = 0.0f;
-
-        // Primary resonance with subtle pitch variations
-        float pitch_variation = 1.0f;
-        if (telegraph->mechanical_noise > 0.0f) {
-          float noise = (generate_white_noise() * 2.0f - 1.0f); // -1 to 1
-          pitch_variation = 1.0f + noise * telegraph->mechanical_noise * 0.05f; // ±5% max variation
-        }
-        float varied_freq = telegraph->resonance_freq * pitch_variation;
-        float primary_resonance = sinf(2.0f * M_PI * varied_freq * t);
-
-        // Secondary resonance at higher frequency (harmonic)
-        float secondary_freq = varied_freq * 2.3f; // Not exactly harmonic for realism
-        float secondary_resonance = sinf(2.0f * M_PI * secondary_freq * t) * 0.3f; // Lower amplitude
-
-        // Tertiary resonance at lower frequency (fundamental mechanical)
-        float tertiary_freq = varied_freq * 0.6f;
-        float tertiary_resonance = sinf(2.0f * M_PI * tertiary_freq * t) * 0.2f; // Even lower amplitude
-
-        // Combine resonances
-        signal = primary_resonance + secondary_resonance + tertiary_resonance;
-
-        // Frequency-dependent decay: higher frequencies decay faster
-        // Solenoid response affects the frequency characteristics
-        float freq_factor = telegraph->resonance_freq / 1000.0f; // Normalize to ~1.0 for 1kHz
-        float solenoid_decay_factor = telegraph->decay_rate * (1.0f + freq_factor * telegraph->solenoid_response);
-        float decay = expf(-t * solenoid_decay_factor);
-
-        out_buffer[samples_written++] = signal * attack_envelope * decay * clamped_volume;
+        float final_signal = generate_telegraph_click(t, telegraph, 1.0f, 1.0f, clamped_volume);
+        out_buffer[samples_written++] = apply_filters(final_signal, &highpass, &lowpass);
       }
 
-      // Fill remainder with optional background room tone
-      for(size_t j = click_samples; j < elem_samples && samples_written < max_samples; j++) {
+      // Fill middle with optional background room tone (silence between key-down and key-up)
+      size_t middle_start = click_samples;
+      size_t middle_end = elem_samples - click_samples;
+      for(size_t j = middle_start; j < middle_end && samples_written < max_samples; j++) {
         float room_tone = 0.0f;
         if (telegraph->room_tone_level > 0.0f) {
-          room_tone = generate_white_noise() * telegraph->room_tone_level * clamped_volume * 0.1f; // Very subtle
+          room_tone = generate_room_tone() * telegraph->room_tone_level * clamped_volume * 0.1f; // Very subtle
         }
-        out_buffer[samples_written++] = room_tone;
+        out_buffer[samples_written++] = apply_filters(room_tone, &highpass, &lowpass);
+      }
+
+      // Key-up click at end (slightly different characteristics for realism)
+      for(size_t j = 0; j < click_samples && samples_written < max_samples; j++) {
+        float t = (float)j / params->sample_rate;
+        float final_signal = generate_telegraph_click(t, telegraph, 0.9f, 0.8f, clamped_volume * 0.7f);
+        out_buffer[samples_written++] = apply_filters(final_signal, &highpass, &lowpass);
       }
     }
   }

@@ -29,7 +29,10 @@ export const OPT = {
   DECAY_RATE: 12,
   MECHANICAL_NOISE: 13,
   SOLENOID_RESPONSE: 14,
-  ROOM_TONE_LEVEL: 15
+  ROOM_TONE_LEVEL: 15,
+  REVERB_AMOUNT: 16,
+  LOW_PASS_CUTOFF: 17,
+  HIGH_PASS_CUTOFF: 18
 };
 
 // Audio mode constants
@@ -83,6 +86,7 @@ export const WAVEFORM_TYPE = {
  * @property {number} [mechanicalNoise=0.1] - Random variations (0.0-1.0)
  * @property {number} [solenoidResponse=0.7] - Electrical response characteristics (0.0-1.0)
  * @property {number} [roomToneLevel=0.05] - Background room tone level (0.0-1.0)
+ * @property {number} [reverbAmount=0.3] - Reverb/echo amount (0.0-1.0)
  */
 
 /**
@@ -138,7 +142,7 @@ function validateAudioParams(params) {
 
   // Telegraph mode parameter validation
   if (audioMode === AUDIO_MODE.TELEGRAPH) {
-    const { clickSharpness, resonanceFreq, decayRate, mechanicalNoise, solenoidResponse, roomToneLevel } = params;
+    const { clickSharpness, resonanceFreq, decayRate, mechanicalNoise, solenoidResponse, roomToneLevel, reverbAmount } = params;
     if (clickSharpness !== undefined && (typeof clickSharpness !== 'number' || clickSharpness < 0 || clickSharpness > 1)) {
       throw new Error("Click sharpness must be between 0.0 and 1.0");
     }
@@ -156,6 +160,9 @@ function validateAudioParams(params) {
     }
     if (roomToneLevel !== undefined && (typeof roomToneLevel !== 'number' || roomToneLevel < 0 || roomToneLevel > 1)) {
       throw new Error("Room tone level must be between 0.0 and 1.0");
+    }
+    if (reverbAmount !== undefined && (typeof reverbAmount !== 'number' || reverbAmount < 0 || reverbAmount > 1)) {
+      throw new Error("Reverb amount must be between 0.0 and 1.0");
     }
   }
 }
@@ -256,13 +263,14 @@ function generateMorseAudio({
   decayRate = 10.0,
   mechanicalNoise = 0.1,
   solenoidResponse = 0.7,
-  roomToneLevel = 0.05
+  roomToneLevel = 0.05,
+  reverbAmount = 0.3
 }) {
   if (!module) throw new Error("WebAssembly module not loaded yet. Try awaiting ready first.");
   validateAudioParams({
     text, wpm, sampleRate, volume, wordGapMultiplier, humanizationFactor, randomSeed, audioMode,
     frequency, waveformType, backgroundStaticLevel, clickSharpness, resonanceFreq, decayRate, mechanicalNoise,
-    solenoidResponse, roomToneLevel
+    solenoidResponse, roomToneLevel, reverbAmount
   });
 
   const morse_new = module.cwrap("morse_new", "number", []);
@@ -301,6 +309,7 @@ function generateMorseAudio({
     morse_set_f32(ctx, OPT.MECHANICAL_NOISE, mechanicalNoise);
     morse_set_f32(ctx, OPT.SOLENOID_RESPONSE, solenoidResponse);
     morse_set_f32(ctx, OPT.ROOM_TONE_LEVEL, roomToneLevel);
+    morse_set_f32(ctx, OPT.REVERB_AMOUNT, reverbAmount);
   }
 
   // Get timing elements first

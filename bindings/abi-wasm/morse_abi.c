@@ -94,6 +94,15 @@ EXPORT int morse_set_f32(MorseCtx* ctx, int key, float value) {
     case MORSE_OPT_ROOM_TONE_LEVEL:
       ctx->audio_params.mode_params.telegraph.room_tone_level = value;
       return 1;
+    case MORSE_OPT_REVERB_AMOUNT:
+      ctx->audio_params.mode_params.telegraph.reverb_amount = value;
+      return 1;
+    case MORSE_OPT_LOW_PASS_CUTOFF:
+      ctx->audio_params.low_pass_cutoff = value;
+      return 1;
+    case MORSE_OPT_HIGH_PASS_CUTOFF:
+      ctx->audio_params.high_pass_cutoff = value;
+      return 1;
     default:
       return 0; // Unknown key - no-op
   }

@@ -50,11 +50,14 @@ typedef struct {
   float mechanical_noise;  // Random variations (0.0-1.0)
   float solenoid_response; // Electrical response characteristics (0.0-1.0)
   float room_tone_level;   // Background room tone level (0.0-1.0)
+  float reverb_amount;     // Reverb/echo amount (0.0-1.0)
 } MorseTelegraphParams;
 
 typedef struct {
   int sample_rate;
   float volume;
+  float low_pass_cutoff;   // Low-pass filter cutoff frequency (Hz, 20000 = disabled)
+  float high_pass_cutoff;  // High-pass filter cutoff frequency (Hz, 20 = disabled)
   MorseAudioMode audio_mode;
   union {
     MorseRadioParams radio;
@@ -66,6 +69,8 @@ typedef struct {
 #define MORSE_DEFAULT_AUDIO_PARAMS (MorseAudioParams){ \
   .sample_rate = 44100, \
   .volume = 0.5f, \
+  .low_pass_cutoff = 20000.0f, \
+  .high_pass_cutoff = 20.0f, \
   .audio_mode = MORSE_RADIO, \
   .mode_params.radio = {.freq_hz = 440.0f, .waveform_type = MORSE_WAVEFORM_SINE, .background_static_level = 0.0f} \
 }
@@ -76,7 +81,8 @@ typedef struct {
   .decay_rate = 10.0f, \
   .mechanical_noise = 0.1f, \
   .solenoid_response = 0.7f, \
-  .room_tone_level = 0.05f \
+  .room_tone_level = 0.05f, \
+  .reverb_amount = 0.3f \
 }
 
 size_t morse_timing(MorseElement *out_elements, size_t max_elements, const char *text, const MorseTimingParams *params);
