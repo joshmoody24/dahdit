@@ -1,0 +1,563 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tap Morse - Interactive Morse Code Input</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            margin: 0;
+            padding: 20px;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            color: white;
+        }
+
+        .container {
+            text-align: center;
+            max-width: 600px;
+            width: 100%;
+        }
+
+        h1 {
+            font-size: 2.5rem;
+            margin-bottom: 10px;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+        }
+
+        .subtitle {
+            font-size: 1.1rem;
+            opacity: 0.9;
+            margin-bottom: 40px;
+        }
+
+        .tap-circle {
+            width: 250px;
+            height: 250px;
+            border-radius: 50%;
+            background: linear-gradient(45deg, #ff6b6b, #ee5a24);
+            border: 6px solid rgba(255,255,255,0.3);
+            margin: 40px auto;
+            cursor: pointer;
+            user-select: none;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.4rem;
+            font-weight: bold;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+            transition: all 0.15s ease;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+        }
+
+        .tap-circle:hover {
+            transform: scale(1.05);
+            box-shadow: 0 12px 40px rgba(0,0,0,0.4);
+        }
+
+        .tap-circle:active, .tap-circle.pressed {
+            transform: scale(0.95);
+            background: linear-gradient(45deg, #e55039, #c44569);
+            box-shadow: 0 4px 20px rgba(0,0,0,0.4);
+        }
+
+        .status {
+            font-size: 1.2rem;
+            margin: 20px 0;
+            min-height: 30px;
+            opacity: 0.9;
+        }
+
+        .signals-display {
+            background: rgba(255,255,255,0.1);
+            border-radius: 15px;
+            padding: 20px;
+            margin: 20px 0;
+            min-height: 60px;
+            font-family: 'Courier New', monospace;
+            font-size: 1.1rem;
+            word-break: break-all;
+            backdrop-filter: blur(10px);
+        }
+
+        .translation {
+            background: rgba(255,255,255,0.15);
+            border-radius: 15px;
+            padding: 25px;
+            margin: 20px 0;
+            min-height: 40px;
+            font-size: 1.5rem;
+            font-weight: bold;
+            backdrop-filter: blur(10px);
+            box-shadow: 0 4px 20px rgba(0,0,0,0.2);
+        }
+
+        .controls {
+            margin: 30px 0;
+        }
+
+        .btn {
+            background: rgba(255,255,255,0.2);
+            border: 2px solid rgba(255,255,255,0.3);
+            color: white;
+            padding: 12px 24px;
+            margin: 0 10px;
+            border-radius: 25px;
+            font-size: 1rem;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            backdrop-filter: blur(10px);
+        }
+
+        .btn:hover {
+            background: rgba(255,255,255,0.3);
+            transform: translateY(-2px);
+            box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+        }
+
+        .btn:active {
+            transform: translateY(0);
+        }
+
+        .stats {
+            display: flex;
+            justify-content: space-around;
+            margin: 30px 0;
+            font-size: 0.9rem;
+            opacity: 0.8;
+        }
+
+        .stat {
+            text-align: center;
+        }
+
+        .stat-value {
+            font-size: 1.8rem;
+            font-weight: bold;
+            display: block;
+        }
+
+        .instructions {
+            background: rgba(255,255,255,0.1);
+            border-radius: 15px;
+            padding: 20px;
+            margin: 20px 0;
+            font-size: 0.95rem;
+            line-height: 1.4;
+            opacity: 0.9;
+            backdrop-filter: blur(10px);
+        }
+
+        .progress-bar {
+            width: 100%;
+            height: 6px;
+            background: rgba(255,255,255,0.2);
+            border-radius: 3px;
+            margin: 10px 0;
+            overflow: hidden;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #ff6b6b, #feca57);
+            border-radius: 3px;
+            width: 0%;
+            transition: width 0.1s ease;
+        }
+
+        @media (max-width: 768px) {
+            .tap-circle {
+                width: 200px;
+                height: 200px;
+                font-size: 1.2rem;
+            }
+
+            h1 {
+                font-size: 2rem;
+            }
+
+            .container {
+                padding: 0 10px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div style="text-align: left; margin-bottom: 20px;">
+            <a href="index.html" style="color: rgba(255,255,255,0.8); text-decoration: none; font-size: 1rem;">← Back to Generator</a>
+        </div>
+
+        <h1>📡 Tap Morse</h1>
+        <div class="subtitle">Tap the circle to input morse code - translation appears after 3 seconds of silence</div>
+
+        <div class="tap-circle" id="tapCircle">
+            TAP & HOLD
+        </div>
+
+        <div class="status" id="status">Ready to receive morse code</div>
+
+        <div class="progress-bar" id="progressContainer" style="display: none;">
+            <div class="progress-fill" id="progressFill"></div>
+        </div>
+
+        <div class="signals-display" id="signalsDisplay">
+            Morse signals will appear here...
+        </div>
+
+        <div class="translation" id="translation">
+            Translation will appear here
+        </div>
+
+        <div class="stats">
+            <div class="stat">
+                <span class="stat-value" id="signalCount">0</span>
+                <span>Signals</span>
+            </div>
+            <div class="stat">
+                <span class="stat-value" id="confidenceScore">-</span>
+                <span>Confidence</span>
+            </div>
+            <div class="stat">
+                <span class="stat-value" id="charactersCount">0</span>
+                <span>Characters</span>
+            </div>
+        </div>
+
+        <div class="controls">
+            <button class="btn" id="clearBtn">Clear All</button>
+            <button class="btn" id="interpretBtn">Interpret Now</button>
+        </div>
+
+        <div class="instructions">
+            <strong>How to use:</strong><br>
+            • Press and hold the circle for dots and dashes<br>
+            • Short taps = dots (•), long holds = dashes (−)<br>
+            • Audio tone plays while you press (600 Hz morse tone)<br>
+            • Release to create gaps between morse elements<br>
+            • After 3 seconds of silence, translation appears automatically<br>
+            • Use standard morse timing: dot=1 unit, dash=3 units, gaps separate letters<br>
+            • Also works with spacebar for keyboard input
+        </div>
+    </div>
+
+    <script type="module">
+        import { interpretMorseSignals, ready } from './bindings/javascript/morse.js';
+
+        // Wait for WASM module to load
+        await ready;
+
+        // State management
+        let signals = [];
+        let isPressed = false;
+        let pressStartTime = 0;
+        let lastReleaseTime = 0;
+        let interpretTimeout = null;
+        let progressInterval = null;
+
+        // Audio context for tone generation
+        let audioContext = null;
+        let oscillator = null;
+        let gainNode = null;
+        let isAudioInitialized = false;
+
+        // DOM elements
+        const tapCircle = document.getElementById('tapCircle');
+        const status = document.getElementById('status');
+        const signalsDisplay = document.getElementById('signalsDisplay');
+        const translation = document.getElementById('translation');
+        const signalCount = document.getElementById('signalCount');
+        const confidenceScore = document.getElementById('confidenceScore');
+        const charactersCount = document.getElementById('charactersCount');
+        const clearBtn = document.getElementById('clearBtn');
+        const interpretBtn = document.getElementById('interpretBtn');
+        const progressContainer = document.getElementById('progressContainer');
+        const progressFill = document.getElementById('progressFill');
+
+        // Timing constants (in milliseconds)
+        const DOT_THRESHOLD = 150; // ms - taps shorter than this are dots
+        const INTERPRETATION_DELAY = 3000; // 3 seconds
+        const PROGRESS_UPDATE_INTERVAL = 50; // ms
+
+        // Audio constants
+        const TONE_FREQUENCY = 600; // Hz - morse code tone frequency
+        const TONE_VOLUME = 0.15; // Volume level (0.0 to 1.0) - reduced to prevent distortion
+        const ATTACK_TIME = 0.01; // 10ms attack time
+        const RELEASE_TIME = 0.02; // 20ms release time
+
+        // Initialize audio context and create persistent oscillator
+        function initAudio() {
+            if (isAudioInitialized) return;
+
+            try {
+                const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+                audioContext = new AudioContextClass();
+
+                // Create persistent oscillator and gain node
+                oscillator = audioContext.createOscillator();
+                gainNode = audioContext.createGain();
+
+                // Configure oscillator
+                oscillator.frequency.setValueAtTime(TONE_FREQUENCY, audioContext.currentTime);
+                oscillator.type = 'sine';
+
+                // Start with gain at 0
+                gainNode.gain.setValueAtTime(0, audioContext.currentTime);
+
+                // Connect nodes
+                oscillator.connect(gainNode);
+                gainNode.connect(audioContext.destination);
+
+                // Start the oscillator (it will run continuously)
+                oscillator.start(audioContext.currentTime);
+
+                isAudioInitialized = true;
+            } catch (error) {
+                console.warn('Audio not supported:', error);
+            }
+        }
+
+        // Start tone playback (fade in)
+        function startTone() {
+            if (!audioContext || !gainNode) return;
+
+            try {
+                // Resume audio context if suspended
+                if (audioContext.state === 'suspended') {
+                    audioContext.resume();
+                }
+
+                // Cancel any existing gain changes
+                gainNode.gain.cancelScheduledValues(audioContext.currentTime);
+
+                // Smooth fade in from current value
+                const currentTime = audioContext.currentTime;
+                gainNode.gain.setValueAtTime(gainNode.gain.value, currentTime);
+                gainNode.gain.linearRampToValueAtTime(TONE_VOLUME, currentTime + ATTACK_TIME);
+            } catch (error) {
+                console.warn('Error starting tone:', error);
+            }
+        }
+
+        // Stop tone playback (fade out)
+        function stopTone() {
+            if (!audioContext || !gainNode) return;
+
+            try {
+                // Cancel any existing gain changes
+                gainNode.gain.cancelScheduledValues(audioContext.currentTime);
+
+                // Smooth fade out from current value
+                const currentTime = audioContext.currentTime;
+                gainNode.gain.setValueAtTime(gainNode.gain.value, currentTime);
+                gainNode.gain.linearRampToValueAtTime(0, currentTime + RELEASE_TIME);
+            } catch (error) {
+                console.warn('Error stopping tone:', error);
+            }
+        }
+
+        // Event handlers
+        function startPress(e) {
+            e.preventDefault();
+            if (isPressed) return;
+
+            // Initialize audio on first interaction (browser autoplay policy)
+            initAudio();
+
+            isPressed = true;
+            pressStartTime = Date.now();
+            tapCircle.classList.add('pressed');
+
+            // Start tone playback
+            startTone();
+
+            // Clear interpretation timeout
+            clearInterpretationTimer();
+
+            // Add gap if there was a previous release
+            if (lastReleaseTime > 0) {
+                const gapDuration = (pressStartTime - lastReleaseTime) / 1000;
+                signals.push({ on: false, seconds: gapDuration });
+            }
+
+            updateStatus('Recording...');
+        }
+
+        function endPress(e) {
+            e.preventDefault();
+            if (!isPressed) return;
+
+            isPressed = false;
+            lastReleaseTime = Date.now();
+            tapCircle.classList.remove('pressed');
+
+            // Stop tone playback
+            stopTone();
+
+            const pressDuration = (lastReleaseTime - pressStartTime) / 1000;
+            signals.push({ on: true, seconds: pressDuration });
+
+            updateDisplay();
+            startInterpretationTimer();
+
+            const pressDurationMs = lastReleaseTime - pressStartTime;
+            const isDot = pressDurationMs < DOT_THRESHOLD;
+            updateStatus(`Added ${isDot ? 'dot' : 'dash'} (${pressDuration.toFixed(3)}s)`);
+        }
+
+        // Mouse events
+        tapCircle.addEventListener('mousedown', startPress);
+        tapCircle.addEventListener('mouseup', endPress);
+        tapCircle.addEventListener('mouseleave', endPress);
+
+        // Touch events
+        tapCircle.addEventListener('touchstart', startPress);
+        tapCircle.addEventListener('touchend', endPress);
+        tapCircle.addEventListener('touchcancel', endPress);
+
+        // Keyboard events (spacebar)
+        document.addEventListener('keydown', (e) => {
+            if (e.code === 'Space' && !e.repeat) {
+                e.preventDefault();
+                startPress(e);
+            }
+        });
+
+        document.addEventListener('keyup', (e) => {
+            if (e.code === 'Space') {
+                e.preventDefault();
+                endPress(e);
+            }
+        });
+
+        function clearInterpretationTimer() {
+            if (interpretTimeout) {
+                clearTimeout(interpretTimeout);
+                interpretTimeout = null;
+            }
+            if (progressInterval) {
+                clearInterval(progressInterval);
+                progressInterval = null;
+            }
+            progressContainer.style.display = 'none';
+            progressFill.style.width = '0%';
+        }
+
+        function startInterpretationTimer() {
+            clearInterpretationTimer();
+
+            if (signals.length === 0) return;
+
+            // Show progress bar
+            progressContainer.style.display = 'block';
+            const startTime = Date.now();
+
+            progressInterval = setInterval(() => {
+                const elapsed = Date.now() - startTime;
+                const progress = Math.min((elapsed / INTERPRETATION_DELAY) * 100, 100);
+                progressFill.style.width = progress + '%';
+
+                if (progress >= 100) {
+                    clearInterval(progressInterval);
+                    progressInterval = null;
+                }
+            }, PROGRESS_UPDATE_INTERVAL);
+
+            interpretTimeout = setTimeout(() => {
+                interpretSignals();
+                progressContainer.style.display = 'none';
+            }, INTERPRETATION_DELAY);
+
+            updateStatus('Waiting for completion... (3 seconds)');
+        }
+
+        function updateDisplay() {
+            // Update signals display with visual representation
+            let display = '';
+            let signalIndex = 0;
+
+            for (const signal of signals) {
+                if (signal.on) {
+                    const durationMs = signal.seconds * 1000; // Convert to ms
+                    const isDot = durationMs < DOT_THRESHOLD;
+                    display += isDot ? '• ' : '− ';
+                } else {
+                    // Show gaps as spaces (visual separation)
+                    display += ' ';
+                }
+                signalIndex++;
+            }
+
+            signalsDisplay.textContent = display || 'Morse signals will appear here...';
+            signalCount.textContent = signals.filter(s => s.on).length;
+        }
+
+        function updateStatus(message) {
+            status.textContent = message;
+        }
+
+        async function interpretSignals() {
+            if (signals.length === 0) {
+                updateStatus('No signals to interpret');
+                return;
+            }
+
+            try {
+                updateStatus('Interpreting morse code...');
+
+                const result = interpretMorseSignals({ signals });
+
+                // Update display with results
+                translation.textContent = result.text || '(No translation)';
+                confidenceScore.textContent = (result.confidence * 100).toFixed(0) + '%';
+                charactersCount.textContent = result.text ? result.text.length : 0;
+
+                updateStatus(`Interpreted: "${result.text}" (${result.patternsRecognized}/${result.signalsProcessed} patterns recognized)`);
+
+                // Clear interpretation timer
+                clearInterpretationTimer();
+
+            } catch (error) {
+                console.error('Interpretation error:', error);
+                translation.textContent = 'Error: ' + error.message;
+                updateStatus('Interpretation failed');
+            }
+        }
+
+        function clearAll() {
+            signals = [];
+            lastReleaseTime = 0;
+            clearInterpretationTimer();
+
+            // Stop any playing tone and reset state
+            if (isPressed) {
+                stopTone();
+                isPressed = false;
+                tapCircle.classList.remove('pressed');
+            }
+
+            signalsDisplay.textContent = 'Morse signals will appear here...';
+            translation.textContent = 'Translation will appear here';
+            signalCount.textContent = '0';
+            confidenceScore.textContent = '-';
+            charactersCount.textContent = '0';
+
+            updateStatus('Ready to receive morse code');
+        }
+
+        // Button event listeners
+        clearBtn.addEventListener('click', clearAll);
+        interpretBtn.addEventListener('click', interpretSignals);
+
+        // Prevent context menu on the circle
+        tapCircle.addEventListener('contextmenu', (e) => e.preventDefault());
+
+        console.log('Tap Morse interface ready!');
+    </script>
+</body>
+</html>

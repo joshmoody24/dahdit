@@ -10,10 +10,11 @@
 #define EXPORT
 #endif
 
-// Context structure holds both parameter structs
+// Context structure holds all parameter structs
 struct MorseCtx {
   MorseTimingParams timing_params;
   MorseAudioParams audio_params;
+  MorseInterpretParams interpret_params;
 };
 
 EXPORT MorseCtx* morse_new(void) {
@@ -23,6 +24,7 @@ EXPORT MorseCtx* morse_new(void) {
   // Initialize with default values
   ctx->timing_params = MORSE_DEFAULT_TIMING_PARAMS;
   ctx->audio_params = MORSE_DEFAULT_AUDIO_PARAMS;
+  ctx->interpret_params = MORSE_DEFAULT_INTERPRET_PARAMS;
   
   return ctx;
 }
@@ -51,6 +53,12 @@ EXPORT int morse_set_i32(MorseCtx* ctx, int key, int value) {
       return 1;
     case MORSE_OPT_WAVEFORM_TYPE:
       ctx->audio_params.mode_params.radio.waveform_type = (MorseWaveformType)value;
+      return 1;
+    case MORSE_OPT_MAX_K_MEANS_ITERATIONS:
+      ctx->interpret_params.max_k_means_iterations = value;
+      return 1;
+    case MORSE_OPT_MAX_OUTPUT_LENGTH:
+      ctx->interpret_params.max_output_length = value;
       return 1;
     default:
       return 0; // Unknown key - no-op
@@ -102,6 +110,12 @@ EXPORT int morse_set_f32(MorseCtx* ctx, int key, float value) {
       return 1;
     case MORSE_OPT_HIGH_PASS_CUTOFF:
       ctx->audio_params.high_pass_cutoff = value;
+      return 1;
+    case MORSE_OPT_CONVERGENCE_THRESHOLD:
+      ctx->interpret_params.convergence_threshold = value;
+      return 1;
+    case MORSE_OPT_NOISE_THRESHOLD:
+      ctx->interpret_params.noise_threshold = value;
       return 1;
     default:
       return 0; // Unknown key - no-op
@@ -173,4 +187,56 @@ EXPORT size_t morse_audio_fill_ctx(MorseCtx* ctx, const int* types, const float*
   size_t count = morse_audio(elements, n, samples, max, &ctx->audio_params);
   free(elements);
   return count;
+}
+
+EXPORT size_t morse_interpret_size_ctx(MorseCtx* ctx, const int* on_states, const float* durations, size_t signal_count) {
+  if (!ctx || !on_states || !durations) return 0;
+
+  // Pack arrays into temporary MorseSignal array
+  MorseSignal* signals = malloc(signal_count * sizeof(MorseSignal));
+  if (!signals) return 0;
+
+  for (size_t i = 0; i < signal_count; i++) {
+    signals[i].on = on_states[i] != 0;
+    signals[i].seconds = durations[i];
+  }
+
+  size_t size = morse_interpret_text_size(signals, signal_count, &ctx->interpret_params);
+  free(signals);
+  return size;
+}
+
+EXPORT size_t morse_interpret_fill_ctx(MorseCtx* ctx, const int* on_states, const float* durations, size_t signal_count, char* text, size_t max_text_size, float* confidence, int* signals_processed, int* patterns_recognized) {
+  if (!ctx || !on_states || !durations || !text) return 0;
+
+  // Pack arrays into temporary MorseSignal array
+  MorseSignal* signals = malloc(signal_count * sizeof(MorseSignal));
+  if (!signals) return 0;
+
+  for (size_t i = 0; i < signal_count; i++) {
+    signals[i].on = on_states[i] != 0;
+    signals[i].seconds = durations[i];
+  }
+
+  MorseInterpretResult result = morse_interpret(signals, signal_count, &ctx->interpret_params);
+  free(signals);
+
+  if (!result.text) return 0;
+
+  // Copy text to output buffer
+  size_t text_len = result.text_length;
+  if (text_len >= max_text_size) {
+    text_len = max_text_size - 1; // Leave room for null terminator
+  }
+
+  memcpy(text, result.text, text_len);
+  text[text_len] = '\0';
+
+  // Set output parameters if provided
+  if (confidence) *confidence = result.confidence;
+  if (signals_processed) *signals_processed = result.signals_processed;
+  if (patterns_recognized) *patterns_recognized = result.patterns_recognized;
+
+  morse_interpret_result_free(&result);
+  return text_len;
 }
