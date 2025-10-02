@@ -4,13 +4,20 @@ Fast WebAssembly-based Morse code generator with prosign support.
 
 ## Features
 
-- Complete ITU Morse code support (A-Z, 0-9, punctuation)
-- Prosign support using bracket syntax: `[SOS]`, `[AR]`, `[SK]`
-- Clean audio with smooth attack/release envelopes
+- **Generation**: Complete ITU Morse code support (A-Z, 0-9, punctuation)
+- **Interpretation**: Real-time morse code interpretation using K-means clustering
+- **Interactive Interface**: Tap-based morse input with automatic translation
+- **Prosign Support**: Using bracket syntax: `[SOS]`, `[AR]`, `[SK]`
+- **High Quality Audio**: Clean waveforms with smooth attack/release envelopes
 
 ## Demo
 
 Try it online: [https://joshmoody24.github.io/dahdit](https://joshmoody24.github.io/dahdit)
+
+### Interactive Features
+
+- **Morse Generator** (`index.html`): Convert text to morse code audio with customizable timing and audio parameters
+- **Tap Morse** (`tap-morse.html`): Interactive morse code input interface - tap and hold to create dots and dashes, automatic interpretation after 3 seconds of silence
 
 ## Languages
 
@@ -21,13 +28,24 @@ npm install dahdit
 ```
 
 ```javascript
-import { generateMorseAudio, playMorseAudio, ready } from 'dahdit';
+import { generateMorseAudio, playMorseAudio, interpretMorseSignals, ready } from 'dahdit';
 
 // Wait for WebAssembly to load (recommended)
 await ready;
 
+// Generate morse code audio
 const audio = generateMorseAudio({ text: "HELLO WORLD [SOS]" });
 playMorseAudio(audio);
+
+// Interpret morse code signals
+const signals = [
+  { on: true, seconds: 0.18 },   // dash
+  { on: false, seconds: 0.06 },  // gap
+  { on: true, seconds: 0.06 },   // dot
+  { on: false, seconds: 0.18 }   // end
+];
+const result = interpretMorseSignals({ signals });
+console.log(result.text); // "N"
 ```
 
 ## Development

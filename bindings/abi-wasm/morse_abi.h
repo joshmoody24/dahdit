@@ -26,7 +26,11 @@ enum MorseOptionKey {
   MORSE_OPT_ROOM_TONE_LEVEL = 15,
   MORSE_OPT_REVERB_AMOUNT = 16,
   MORSE_OPT_LOW_PASS_CUTOFF = 17,
-  MORSE_OPT_HIGH_PASS_CUTOFF = 18
+  MORSE_OPT_HIGH_PASS_CUTOFF = 18,
+  MORSE_OPT_MAX_K_MEANS_ITERATIONS = 19,
+  MORSE_OPT_MAX_OUTPUT_LENGTH = 20,
+  MORSE_OPT_CONVERGENCE_THRESHOLD = 21,
+  MORSE_OPT_NOISE_THRESHOLD = 22
 };
 
 // Context management
@@ -42,8 +46,12 @@ int morse_set_str(MorseCtx* ctx, int key, const char* value);  // Reserved for f
 size_t morse_timing_size_ctx(MorseCtx* ctx, const char* text);
 size_t morse_timing_fill_ctx(MorseCtx* ctx, const char* text, int* types, float* durs, size_t max);
 
-// Audio functions  
+// Audio functions
 size_t morse_audio_size_ctx(MorseCtx* ctx, const int* types, const float* durs, size_t n);
 size_t morse_audio_fill_ctx(MorseCtx* ctx, const int* types, const float* durs, size_t n, float* samples, size_t max);
+
+// Interpretation functions
+size_t morse_interpret_size_ctx(MorseCtx* ctx, const int* on_states, const float* durations, size_t signal_count);
+size_t morse_interpret_fill_ctx(MorseCtx* ctx, const int* on_states, const float* durations, size_t signal_count, char* text, size_t max_text_size, float* confidence, int* signals_processed, int* patterns_recognized);
 
 #endif

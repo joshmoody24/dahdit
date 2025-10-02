@@ -1,7 +1,7 @@
 CC = gcc
 CFLAGS = -Wall -O2
-OBJS = main.o morse.o wav.o
-TEST_OBJS = test.o morse.o wav.o
+OBJS = main.o morse.o wav.o interpret_morse.o
+TEST_OBJS = test.o morse.o wav.o interpret_morse.o
 
 all: morse
 

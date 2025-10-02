@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { generateMorseTiming, generateMorseAudio, playMorseAudio, ready, AUDIO_MODE, WAVEFORM_TYPE } from './morse.js';
+import { generateMorseTiming, generateMorseAudio, playMorseAudio, interpretMorseSignals, ready, AUDIO_MODE, WAVEFORM_TYPE } from './morse.js';
 
 // Simple test framework
 let testsRun = 0;
@@ -227,6 +227,90 @@ test('background_static', () => {
 
   // Static version should have higher average energy
   return staticSum > cleanSum;
+});
+
+// Test basic interpretation
+test('basic_interpretation', () => {
+  const dot = 0.06;
+  const dash = 0.18;  // 3x dot duration
+  const elementGap = 0.06;  // 1x dot duration
+  const charGap = 0.18;     // 3x dot duration
+
+  const signals = [
+    { on: true, seconds: dash },       // dash
+    { on: false, seconds: elementGap }, // inter-element gap
+    { on: true, seconds: dot },        // dot
+    { on: false, seconds: charGap }    // inter-character gap
+  ];
+
+  const result = interpretMorseSignals({ signals });
+  return result.text === 'N' && result.confidence >= 0.5;
+});
+
+// Test multi-character interpretation
+test('multi_character_interpretation', () => {
+  const dot = 0.06;
+  const dash = 0.18;
+  const elementGap = 0.06;
+  const charGap = 0.18;
+  const wordGap = 0.42; // 7x dot duration
+
+  const signals = [
+    // S: dot-dot-dot
+    { on: true, seconds: dot },       { on: false, seconds: elementGap },
+    { on: true, seconds: dot },       { on: false, seconds: elementGap },
+    { on: true, seconds: dot },       { on: false, seconds: charGap },
+    // O: dash-dash-dash
+    { on: true, seconds: dash },      { on: false, seconds: elementGap },
+    { on: true, seconds: dash },      { on: false, seconds: elementGap },
+    { on: true, seconds: dash },      { on: false, seconds: charGap },
+    // S: dot-dot-dot
+    { on: true, seconds: dot },       { on: false, seconds: elementGap },
+    { on: true, seconds: dot },       { on: false, seconds: elementGap },
+    { on: true, seconds: dot },       { on: false, seconds: wordGap }
+  ];
+
+  const result = interpretMorseSignals({ signals });
+  return result.text === 'SOS' && result.confidence >= 0.3; // Lower threshold due to multi-character complexity
+});
+
+// Test interpretation parameter validation
+test('interpretation_parameter_validation', () => {
+  try {
+    interpretMorseSignals({
+      signals: [], // Empty array should fail
+      maxKMeansIterations: 50
+    });
+    return false; // Should have thrown
+  } catch (error) {
+    return error.message.includes('non-empty array');
+  }
+});
+
+// Test round-trip interpretation
+test('round_trip_interpretation', () => {
+  const originalText = 'ET';
+  const timings = generateMorseTiming({ text: originalText, wpm: 20 });
+
+  // Convert timings to signals
+  const signals = [];
+  for (const timing of timings) {
+    if (timing.type === 'gap') {
+      if (signals.length > 0) {
+        signals.push({ on: false, seconds: timing.duration_seconds });
+      }
+    } else {
+      signals.push({ on: true, seconds: timing.duration_seconds });
+    }
+  }
+
+  // Add final gap if needed
+  if (signals.length > 0 && signals[signals.length - 1].on) {
+    signals.push({ on: false, seconds: 0.2 });
+  }
+
+  const result = interpretMorseSignals({ signals });
+  return result.text === originalText && result.confidence > 0.8;
 });
 
 console.log(`\nResults: ${testsPassed}/${testsRun} tests passed`);

@@ -32,7 +32,11 @@ export const OPT = {
   ROOM_TONE_LEVEL: 15,
   REVERB_AMOUNT: 16,
   LOW_PASS_CUTOFF: 17,
-  HIGH_PASS_CUTOFF: 18
+  HIGH_PASS_CUTOFF: 18,
+  MAX_K_MEANS_ITERATIONS: 19,
+  MAX_OUTPUT_LENGTH: 20,
+  CONVERGENCE_THRESHOLD: 21,
+  NOISE_THRESHOLD: 22
 };
 
 // Audio mode constants
@@ -394,5 +398,179 @@ function playMorseAudio(audioResult) {
   }
 }
 
+/**
+ * @typedef {Object} MorseSignal
+ * @property {boolean} on - Signal on/off state
+ * @property {number} seconds - Duration in seconds
+ */
+
+/**
+ * @typedef {Object} MorseInterpretParams
+ * @property {Array<MorseSignal>} signals - Array of morse signals
+ * @property {number} [maxKMeansIterations=100] - Maximum K-means iterations
+ * @property {number} [convergenceThreshold=0.001] - K-means convergence threshold
+ * @property {number} [noiseThreshold=0.001] - Noise filtering threshold
+ * @property {number} [maxOutputLength=1000] - Maximum output text length
+ */
+
+/**
+ * @typedef {Object} MorseInterpretResult
+ * @property {string} text - Interpreted text
+ * @property {number} confidence - Interpretation confidence (0.0-1.0)
+ * @property {number} signalsProcessed - Number of signals processed
+ * @property {number} patternsRecognized - Number of patterns recognized
+ */
+
+/**
+ * Validates interpretation parameters
+ * @param {MorseInterpretParams} params - Parameters to validate
+ * @throws {Error} If validation fails
+ */
+function validateInterpretParams({ signals, maxKMeansIterations, convergenceThreshold, noiseThreshold, maxOutputLength }) {
+  if (!Array.isArray(signals) || signals.length === 0) {
+    throw new Error("Signals must be a non-empty array");
+  }
+
+  for (let i = 0; i < signals.length; i++) {
+    const signal = signals[i];
+    if (typeof signal !== 'object' || signal === null) {
+      throw new Error(`Signal at index ${i} must be an object`);
+    }
+    if (typeof signal.on !== 'boolean') {
+      throw new Error(`Signal at index ${i} must have a boolean 'on' property`);
+    }
+    if (typeof signal.seconds !== 'number' || signal.seconds < 0) {
+      throw new Error(`Signal at index ${i} must have a non-negative 'seconds' property`);
+    }
+  }
+
+  if (maxKMeansIterations !== undefined && (!Number.isInteger(maxKMeansIterations) || maxKMeansIterations <= 0)) {
+    throw new Error("maxKMeansIterations must be a positive integer");
+  }
+  if (convergenceThreshold !== undefined && (typeof convergenceThreshold !== 'number' || convergenceThreshold <= 0)) {
+    throw new Error("convergenceThreshold must be a positive number");
+  }
+  if (noiseThreshold !== undefined && (typeof noiseThreshold !== 'number' || noiseThreshold < 0)) {
+    throw new Error("noiseThreshold must be a non-negative number");
+  }
+  if (maxOutputLength !== undefined && (!Number.isInteger(maxOutputLength) || maxOutputLength <= 0)) {
+    throw new Error("maxOutputLength must be a positive integer");
+  }
+}
+
+/**
+ * Interprets Morse code signals to text
+ * @param {MorseInterpretParams} params - Interpretation parameters
+ * @returns {MorseInterpretResult} Interpretation result
+ * @throws {Error} If WebAssembly module not loaded or interpretation failed
+ */
+function interpretMorseSignals({
+  signals,
+  maxKMeansIterations = 100,
+  convergenceThreshold = 0.001,
+  noiseThreshold = 0.001,
+  maxOutputLength = 1000
+}) {
+  if (!module) throw new Error("WebAssembly module not loaded yet. Try awaiting ready first.");
+  validateInterpretParams({ signals, maxKMeansIterations, convergenceThreshold, noiseThreshold, maxOutputLength });
+
+  const morse_new = module.cwrap("morse_new", "number", []);
+  const morse_free = module.cwrap("morse_free", "void", ["number"]);
+  const morse_set_i32 = module.cwrap("morse_set_i32", "number", ["number", "number", "number"]);
+  const morse_set_f32 = module.cwrap("morse_set_f32", "number", ["number", "number", "number"]);
+  const morse_interpret_size_ctx = module.cwrap("morse_interpret_size_ctx", "number",
+    ["number", "number", "number", "number"]);
+  const morse_interpret_fill_ctx = module.cwrap("morse_interpret_fill_ctx", "number",
+    ["number", "number", "number", "number", "number", "number", "number", "number", "number"]);
+
+  // Create context and set parameters
+  const ctx = morse_new();
+  if (!ctx) throw new Error("Failed to create Morse context");
+
+  morse_set_i32(ctx, OPT.MAX_K_MEANS_ITERATIONS, maxKMeansIterations);
+  morse_set_f32(ctx, OPT.CONVERGENCE_THRESHOLD, convergenceThreshold);
+  morse_set_f32(ctx, OPT.NOISE_THRESHOLD, noiseThreshold);
+  morse_set_i32(ctx, OPT.MAX_OUTPUT_LENGTH, maxOutputLength);
+
+  // Convert signals to separate arrays
+  const signalCount = signals.length;
+  const onStatesPtr = module._malloc(signalCount * 4); // int array
+  const durationsPtr = module._malloc(signalCount * 4); // float array
+
+  const buffer = module.HEAPU8.buffer;
+  const onStatesView = new Int32Array(buffer, onStatesPtr, signalCount);
+  const durationsView = new Float32Array(buffer, durationsPtr, signalCount);
+
+  for (let i = 0; i < signalCount; i++) {
+    onStatesView[i] = signals[i].on ? 1 : 0;
+    durationsView[i] = signals[i].seconds;
+  }
+
+  // Get text size needed
+  const textSize = morse_interpret_size_ctx(ctx, onStatesPtr, durationsPtr, signalCount);
+  if (textSize === 0) {
+    module._free(onStatesPtr);
+    module._free(durationsPtr);
+    morse_free(ctx);
+    throw new Error("Failed to interpret Morse signals");
+  }
+
+  // Allocate buffers for results
+  const textPtr = module._malloc(textSize);
+  const confidencePtr = module._malloc(4); // float
+  const signalsProcessedPtr = module._malloc(4); // int
+  const patternsRecognizedPtr = module._malloc(4); // int
+
+  // Fill result data
+  const actualTextLength = morse_interpret_fill_ctx(
+    ctx,
+    onStatesPtr,
+    durationsPtr,
+    signalCount,
+    textPtr,
+    textSize,
+    confidencePtr,
+    signalsProcessedPtr,
+    patternsRecognizedPtr
+  );
+
+  if (actualTextLength === 0) {
+    module._free(onStatesPtr);
+    module._free(durationsPtr);
+    module._free(textPtr);
+    module._free(confidencePtr);
+    module._free(signalsProcessedPtr);
+    module._free(patternsRecognizedPtr);
+    morse_free(ctx);
+    throw new Error("Failed to interpret Morse signals");
+  }
+
+  // Extract results
+  const textBytes = new Uint8Array(buffer, textPtr, actualTextLength);
+  const text = new TextDecoder().decode(textBytes);
+
+  const confidenceView = new Float32Array(buffer, confidencePtr, 1);
+  const signalsProcessedView = new Int32Array(buffer, signalsProcessedPtr, 1);
+  const patternsRecognizedView = new Int32Array(buffer, patternsRecognizedPtr, 1);
+
+  const result = {
+    text: text,
+    confidence: confidenceView[0],
+    signalsProcessed: signalsProcessedView[0],
+    patternsRecognized: patternsRecognizedView[0]
+  };
+
+  // Cleanup
+  module._free(onStatesPtr);
+  module._free(durationsPtr);
+  module._free(textPtr);
+  module._free(confidencePtr);
+  module._free(signalsProcessedPtr);
+  module._free(patternsRecognizedPtr);
+  morse_free(ctx);
+
+  return result;
+}
+
 // Export individual functions for tree shaking
-export { generateMorseTiming, generateMorseAudio, playMorseAudio };
+export { generateMorseTiming, generateMorseAudio, playMorseAudio, interpretMorseSignals };

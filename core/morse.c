@@ -300,7 +300,8 @@ static const int pattern_dollar[] = {0, 0, 0, 1, 0, 0, 1, -1}; // ...-..-
 static const int pattern_at[] = {0, 1, 1, 0, 1, 0, -1};       // .--.-.
 
 // Direct lookup table - fastest possible O(1) access
-static const int* morse_patterns[256] = {
+// Made non-static so interpret_morse.c can access it
+const int* morse_patterns[256] = {
   // Uppercase letters
   ['A'] = pattern_A, ['B'] = pattern_B, ['C'] = pattern_C, ['D'] = pattern_D,
   ['E'] = pattern_E, ['F'] = pattern_F, ['G'] = pattern_G, ['H'] = pattern_H,
