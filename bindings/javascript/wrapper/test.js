@@ -5,8 +5,8 @@ import {
   generateMorseAudio,
   playMorseAudio,
   interpretMorseSignals,
-  MorseAudioMode,
-  MorseWaveformType,
+  AudioMode,
+  WaveformType,
 } from "./morse.js";
 
 // Simple test framework
@@ -33,13 +33,13 @@ console.log("==============================\n");
 
 // Test basic timing generation
 test("basic_timing", () => {
-  const result = generateMorseTiming({ text: "E" });
+  const result = generateMorseTiming("E");
   return result.length === 1 && result[0].type === "dot";
 });
 
 // Test timing with multiple characters
 test("multi_character_timing", () => {
-  const result = generateMorseTiming({ text: "SOS" });
+  const result = generateMorseTiming("SOS");
   return (
     result.length > 5 &&
     result.some((e) => e.type === "dot") &&
@@ -49,14 +49,14 @@ test("multi_character_timing", () => {
 
 // Test WPM parameter
 test("wpm_parameter", () => {
-  const fast = generateMorseTiming({ text: "E", wpm: 40 });
-  const slow = generateMorseTiming({ text: "E", wpm: 10 });
+  const fast = generateMorseTiming("E", { wpm: 40 });
+  const slow = generateMorseTiming("E", { wpm: 10 });
   return fast[0].duration_seconds < slow[0].duration_seconds;
 });
 
 // Test audio generation
 test("audio_generation", () => {
-  const result = generateMorseAudio({ text: "E" });
+  const result = generateMorseAudio("E");
   return (
     result &&
     result.audioData &&
@@ -67,20 +67,18 @@ test("audio_generation", () => {
 
 // Test radio mode audio
 test("radio_mode", () => {
-  const result = generateMorseAudio({
-    text: "E",
-    audioMode: MorseAudioMode.Radio,
-    frequency: 600,
-    waveformType: MorseWaveformType.Sine,
+  const result = generateMorseAudio("E", {
+    audioMode: AudioMode.Radio,
+    freqHz: 600,
+    waveformType: WaveformType.Sine,
   });
   return result && result.audioData && result.audioData.length > 0;
 });
 
 // Test telegraph mode audio
 test("telegraph_mode", () => {
-  const result = generateMorseAudio({
-    text: "E",
-    audioMode: MorseAudioMode.Telegraph,
+  const result = generateMorseAudio("E", {
+    audioMode: AudioMode.Telegraph,
     clickSharpness: 0.7,
     resonanceFreq: 800,
   });
@@ -89,21 +87,17 @@ test("telegraph_mode", () => {
 
 // Test different waveforms
 test("different_waveforms", () => {
-  const sine = generateMorseAudio({
-    text: "E",
-    waveformType: MorseWaveformType.Sine,
+  const sine = generateMorseAudio("E", {
+    waveformType: WaveformType.Sine,
   });
-  const square = generateMorseAudio({
-    text: "E",
-    waveformType: MorseWaveformType.Square,
+  const square = generateMorseAudio("E", {
+    waveformType: WaveformType.Square,
   });
-  const sawtooth = generateMorseAudio({
-    text: "E",
-    waveformType: MorseWaveformType.Sawtooth,
+  const sawtooth = generateMorseAudio("E", {
+    waveformType: WaveformType.Sawtooth,
   });
-  const triangle = generateMorseAudio({
-    text: "E",
-    waveformType: MorseWaveformType.Triangle,
+  const triangle = generateMorseAudio("E", {
+    waveformType: WaveformType.Triangle,
   });
 
   return (
@@ -116,9 +110,8 @@ test("different_waveforms", () => {
 
 // Test humanization
 test("humanization", () => {
-  const normal = generateMorseTiming({ text: "E", randomSeed: 12345 });
-  const humanized = generateMorseTiming({
-    text: "E",
+  const normal = generateMorseTiming("E", { randomSeed: 12345 });
+  const humanized = generateMorseTiming("E", {
     humanizationFactor: 0.5,
     randomSeed: 12345,
   });
@@ -129,7 +122,7 @@ test("humanization", () => {
 
 // Test prosign parsing
 test("prosign_brackets", () => {
-  const result = generateMorseTiming({ text: "[SOS]" });
+  const result = generateMorseTiming("[SOS]");
   return (
     result.length > 0 &&
     result.some((e) => e.type === "dot") &&
@@ -140,23 +133,24 @@ test("prosign_brackets", () => {
 // Test validation
 test("parameter_validation", () => {
   try {
-    generateMorseTiming({ text: "", wpm: -1 });
+    generateMorseTiming("", { wpm: -1 });
     return false; // Should have thrown
   } catch (error) {
     return (
       error.message.includes("WPM") ||
-      error.message.includes("Invalid text input")
+      error.message.includes("Invalid text input") ||
+      error.message.includes("Text must be a non-empty string")
     );
   }
 });
 
-// Test interpretation (should fail as not implemented)
-test("interpretation_not_implemented", () => {
+// Test interpretation (should work now)
+test("interpretation_works", () => {
   try {
-    interpretMorseSignals({ signals: [{ on: true, seconds: 0.1 }] });
-    return false; // Should have thrown
+    const result = interpretMorseSignals([{ on: true, seconds: 0.1 }]);
+    return result.text.length > 0 && typeof result.confidence === "number";
   } catch (error) {
-    return error.message.includes("not implemented");
+    return false;
   }
 });
 

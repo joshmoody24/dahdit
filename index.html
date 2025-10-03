@@ -193,6 +193,34 @@
             font-family: 'Courier New', monospace;
         }
 
+        details {
+            margin: 20px 0;
+            border: 2px solid var(--border-color);
+            border-radius: 8px;
+            background: var(--card-background);
+        }
+
+        details summary {
+            padding: 15px;
+            cursor: pointer;
+            background: #f8f9fa;
+            border-radius: 6px 6px 0 0;
+            user-select: none;
+        }
+
+        details[open] summary {
+            border-bottom: 1px solid var(--border-color);
+            border-radius: 6px 6px 0 0;
+        }
+
+        details[open] {
+            padding-bottom: 15px;
+        }
+
+        details .param-group {
+            margin: 15px;
+        }
+
         @media (max-width: 600px) {
             .param-group {
                 grid-template-columns: 1fr;
@@ -235,12 +263,6 @@
         </div>
 
         <div class="param-group">
-            <label for="frequency">Frequency:</label>
-            <input type="range" id="frequency" min="200" max="1000" value="440">
-            <span class="value-display" id="frequency-value">440 Hz</span>
-        </div>
-
-        <div class="param-group">
             <label for="volume">Volume:</label>
             <input type="range" id="volume" min="0" max="100" value="50">
             <span class="value-display" id="volume-value">0.5</span>
@@ -252,82 +274,96 @@
             <span class="value-display" id="wordGap-value">1.0x</span>
         </div>
 
-        <div class="param-group">
-            <label for="humanization">Humanization:</label>
-            <input type="range" id="humanization" min="0" max="100" value="0">
-            <span class="value-display" id="humanization-value">0.0</span>
-        </div>
+        <details>
+            <summary><strong>Advanced Settings</strong></summary>
 
-        <div class="param-group">
-            <label for="randomSeed">Random Seed:</label>
-            <input type="number" id="randomSeed" min="0" max="999999" value="0" placeholder="0 = random">
-        </div>
+            <div class="param-group">
+                <label for="audioMode">Audio Mode:</label>
+                <select id="audioMode">
+                    <option value="0">Radio</option>
+                    <option value="1">Telegraph</option>
+                </select>
+            </div>
 
-        <div class="param-group">
-            <label for="audioMode">Audio Mode:</label>
-            <select id="audioMode">
-                <option value="0">Radio</option>
-                <option value="1">Telegraph</option>
-            </select>
-        </div>
+            <!-- Radio Mode Parameters -->
+            <div class="param-group" id="radioParams">
+                <label for="frequency">Frequency:</label>
+                <input type="range" id="frequency" min="200" max="1000" value="440">
+                <span class="value-display" id="frequency-value">440 Hz</span>
+            </div>
 
-        <div class="param-group" id="radioParams">
-            <label for="waveform">Waveform:</label>
-            <select id="waveform">
-                <option value="0">Sine</option>
-                <option value="1">Square</option>
-                <option value="2">Sawtooth</option>
-                <option value="3">Triangle</option>
-            </select>
-        </div>
+            <div class="param-group" id="waveformGroup">
+                <label for="waveform">Waveform:</label>
+                <select id="waveform">
+                    <option value="0">Sine</option>
+                    <option value="1">Square</option>
+                    <option value="2">Sawtooth</option>
+                    <option value="3">Triangle</option>
+                </select>
+            </div>
 
-        <div class="param-group" id="backgroundStaticGroup">
-            <label for="backgroundStatic">Background Static:</label>
-            <input type="range" id="backgroundStatic" min="0" max="100" value="0">
-            <span class="value-display" id="backgroundStatic-value">0.0</span>
-        </div>
+            <div class="param-group" id="backgroundStaticGroup">
+                <label for="backgroundStatic">Background Static:</label>
+                <input type="range" id="backgroundStatic" min="0" max="100" value="0">
+                <span class="value-display" id="backgroundStatic-value">0.0</span>
+            </div>
 
-        <div class="param-group hidden" id="telegraphParams">
-            <label for="clickSharpness">Click Sharpness:</label>
-            <input type="range" id="clickSharpness" min="0" max="100" value="50">
-            <span class="value-display" id="clickSharpness-value">0.5</span>
-        </div>
+            <!-- Telegraph Mode Parameters -->
+            <div class="param-group hidden" id="telegraphParams">
+                <label for="clickSharpness">Click Sharpness:</label>
+                <input type="range" id="clickSharpness" min="0" max="100" value="50">
+                <span class="value-display" id="clickSharpness-value">0.5</span>
+            </div>
 
-        <div class="param-group hidden" id="resonanceFreqGroup">
-            <label for="resonanceFreq">Resonance Freq:</label>
-            <input type="range" id="resonanceFreq" min="200" max="2000" value="800">
-            <span class="value-display" id="resonanceFreq-value">800 Hz</span>
-        </div>
+            <div class="param-group hidden" id="resonanceFreqGroup">
+                <label for="resonanceFreq">Resonance Freq:</label>
+                <input type="range" id="resonanceFreq" min="200" max="2000" value="800">
+                <span class="value-display" id="resonanceFreq-value">800 Hz</span>
+            </div>
 
-        <div class="param-group hidden" id="decayRateGroup">
-            <label for="decayRate">Decay Rate:</label>
-            <input type="range" id="decayRate" min="1" max="50" value="10">
-            <span class="value-display" id="decayRate-value">10.0</span>
-        </div>
+            <div class="param-group hidden" id="decayRateGroup">
+                <label for="decayRate">Decay Rate:</label>
+                <input type="range" id="decayRate" min="1" max="50" value="10">
+                <span class="value-display" id="decayRate-value">10.0</span>
+            </div>
 
-        <div class="param-group hidden" id="mechanicalNoiseGroup">
-            <label for="mechanicalNoise">Mechanical Noise:</label>
-            <input type="range" id="mechanicalNoise" min="0" max="100" value="10">
-            <span class="value-display" id="mechanicalNoise-value">0.1</span>
-        </div>
+            <div class="param-group hidden" id="mechanicalNoiseGroup">
+                <label for="mechanicalNoise">Mechanical Noise:</label>
+                <input type="range" id="mechanicalNoise" min="0" max="100" value="10">
+                <span class="value-display" id="mechanicalNoise-value">0.1</span>
+            </div>
 
-        <div class="param-group hidden" id="solenoidResponseGroup">
-            <label for="solenoidResponse">Solenoid Response:</label>
-            <input type="range" id="solenoidResponse" min="0" max="100" value="70">
-            <span class="value-display" id="solenoidResponse-value">0.7</span>
-        </div>
+            <div class="param-group hidden" id="solenoidResponseGroup">
+                <label for="solenoidResponse">Solenoid Response:</label>
+                <input type="range" id="solenoidResponse" min="0" max="100" value="70">
+                <span class="value-display" id="solenoidResponse-value">0.7</span>
+            </div>
 
-        <div class="param-group hidden" id="roomToneLevelGroup">
-            <label for="roomToneLevel">Room Tone Level:</label>
-            <input type="range" id="roomToneLevel" min="0" max="100" value="5">
-            <span class="value-display" id="roomToneLevel-value">0.05</span>
-        </div>
+            <!-- Humanization (fixed to only work when = 0) -->
+            <div class="param-group">
+                <label for="humanization">Humanization (currently disabled):</label>
+                <input type="range" id="humanization" min="0" max="0" value="0" disabled>
+                <span class="value-display" id="humanization-value">0.0</span>
+            </div>
 
-        <div class="param-group hidden" id="reverbAmountGroup">
-            <label for="reverbAmount">Reverb Amount:</label>
-            <input type="range" id="reverbAmount" min="0" max="100" value="30">
-            <span class="value-display" id="reverbAmount-value">0.30</span>
-        </div>
+            <div class="param-group hidden" id="roomToneLevelGroup">
+                <label for="roomToneLevel">Room Tone Level:</label>
+                <input type="range" id="roomToneLevel" min="0" max="100" value="5">
+                <span class="value-display" id="roomToneLevel-value">0.05</span>
+            </div>
+
+            <div class="param-group hidden" id="reverbAmountGroup">
+                <label for="reverbAmount">Reverb Amount:</label>
+                <input type="range" id="reverbAmount" min="0" max="100" value="30">
+                <span class="value-display" id="reverbAmount-value">0.30</span>
+            </div>
+
+            <div class="param-group">
+                <label for="randomSeed">Random Seed:</label>
+                <input type="number" id="randomSeed" min="0" max="999999" value="0" placeholder="0 = random">
+            </div>
+
+        </details>
 
         <div class="button-group">
             <button id="playPause">Play</button>
@@ -338,7 +374,7 @@
     <div id="status">Ready! Enter text and click Play.</div>
 
     <script type="module">
-        import { generateMorseAudio, playMorseAudio, MorseAudioMode, MorseWaveformType } from './bindings/javascript/wrapper/morse.js';
+        import { generateMorseAudio, playMorseAudio, AudioMode, WaveformType } from './bindings/javascript/wrapper/morse.js';
 
         let currentSource = null;
         let lastGeneratedAudio = null;
@@ -421,6 +457,7 @@
             // Group related parameter elements
             const radioElements = [
                 'radioParams',
+                'waveformGroup',
                 'backgroundStaticGroup'
             ];
 
@@ -446,7 +483,7 @@
                 });
             };
 
-            if (audioMode === MorseAudioMode.Radio) {
+            if (audioMode === AudioMode.Radio) {
                 toggleGroup(radioElements, true);
                 toggleGroup(telegraphElements, false);
             } else {
@@ -505,8 +542,8 @@
             updatePlayPauseButton();
 
             const audioMode = parseInt(document.getElementById('audioMode').value);
+            const text = document.getElementById('text').value;
             const params = {
-                text: document.getElementById('text').value,
                 wpm: parseInt(document.getElementById('wpm').value),
                 volume: parseFloat(document.getElementById('volume').value) / 100,
                 wordGapMultiplier: parseFloat(document.getElementById('wordGap').value) / 100,
@@ -515,12 +552,12 @@
                 audioMode: audioMode
             };
 
-            // Add mode-specific parameters
-            if (audioMode === MorseAudioMode.Radio) {
-                params.frequency = parseInt(document.getElementById('frequency').value);
+            // Add mode-specific parameters (flat structure)
+            if (audioMode === AudioMode.Radio) {
+                params.freqHz = parseInt(document.getElementById('frequency').value);
                 params.waveformType = parseInt(document.getElementById('waveform').value);
                 params.backgroundStaticLevel = parseFloat(document.getElementById('backgroundStatic').value) / 100;
-            } else if (audioMode === MorseAudioMode.Telegraph) {
+            } else if (audioMode === AudioMode.Telegraph) {
                 params.clickSharpness = parseFloat(document.getElementById('clickSharpness').value) / 100;
                 params.resonanceFreq = parseFloat(document.getElementById('resonanceFreq').value);
                 params.decayRate = parseFloat(document.getElementById('decayRate').value);
@@ -533,7 +570,7 @@
             document.getElementById('status').textContent = 'Generating audio...';
 
             try {
-                const audioResult = await generateMorseAudio(params);
+                const audioResult = await generateMorseAudio(text, params);
                 isGenerating = false;
 
                 if (audioResult) {

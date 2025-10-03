@@ -2,12 +2,14 @@
 // Rust port of the original C implementation with WebAssembly bindings
 
 pub mod audio;
+pub mod interpret;
 pub mod patterns;
 pub mod timing;
 pub mod types;
 
 // Re-export main public API
 pub use audio::{morse_audio, morse_audio_size};
+pub use interpret::morse_interpret;
 pub use timing::{morse_timing, morse_timing_size};
 pub use types::*;
 
@@ -123,5 +125,299 @@ mod tests {
         // Just verify both have gaps (prosign logic might be different than expected)
         assert!(result_gaps > 0);
         assert!(normal_gaps > 0);
+    }
+
+    #[test]
+    fn test_morse_interpret() {
+        use crate::interpret::morse_interpret;
+        use crate::types::{MorseInterpretParams, MorseSignal};
+
+        let params = MorseInterpretParams::default();
+
+        // Test empty signals
+        let result = morse_interpret(&[], &params).unwrap();
+        assert_eq!(result.text, "");
+        assert_eq!(result.confidence, 0.0);
+
+        // Test single character 'E' = .
+        let signals = vec![
+            MorseSignal {
+                on: true,
+                seconds: 0.1,
+            }, // dot
+            MorseSignal {
+                on: false,
+                seconds: 0.3,
+            }, // character gap
+        ];
+
+        let result = morse_interpret(&signals, &params).unwrap();
+        assert_eq!(result.text, "E");
+        assert!(result.confidence > 0.0);
+        assert_eq!(result.signals_processed, 2);
+        assert_eq!(result.patterns_recognized, 1);
+    }
+
+    #[test]
+    fn test_morse_interpret_word() {
+        use crate::interpret::morse_interpret;
+        use crate::types::{MorseInterpretParams, MorseSignal};
+
+        let params = MorseInterpretParams::default();
+
+        // Test "HI" = .... ..
+        let dot = 0.1;
+        let _dash = 0.3;
+        let element_gap = 0.1;
+        let char_gap = 0.3;
+
+        let signals = vec![
+            // H = ....
+            MorseSignal {
+                on: true,
+                seconds: dot,
+            },
+            MorseSignal {
+                on: false,
+                seconds: element_gap,
+            },
+            MorseSignal {
+                on: true,
+                seconds: dot,
+            },
+            MorseSignal {
+                on: false,
+                seconds: element_gap,
+            },
+            MorseSignal {
+                on: true,
+                seconds: dot,
+            },
+            MorseSignal {
+                on: false,
+                seconds: element_gap,
+            },
+            MorseSignal {
+                on: true,
+                seconds: dot,
+            },
+            MorseSignal {
+                on: false,
+                seconds: char_gap,
+            },
+            // I = ..
+            MorseSignal {
+                on: true,
+                seconds: dot,
+            },
+            MorseSignal {
+                on: false,
+                seconds: element_gap,
+            },
+            MorseSignal {
+                on: true,
+                seconds: dot,
+            },
+        ];
+
+        let result = morse_interpret(&signals, &params).unwrap();
+        assert_eq!(result.text, "HI");
+        assert!(result.confidence > 0.5);
+        assert!(result.patterns_recognized >= 2);
+    }
+
+    // Helper function to convert timing elements to signals for round-trip testing
+    fn timing_elements_to_signals(elements: &[MorseElement]) -> Vec<MorseSignal> {
+        let mut signals = Vec::new();
+
+        for element in elements {
+            let on = match element.element_type {
+                MorseElementType::Dot | MorseElementType::Dash => true,
+                MorseElementType::Gap => false,
+            };
+
+            signals.push(MorseSignal {
+                on,
+                seconds: element.duration_seconds,
+            });
+        }
+
+        signals
+    }
+
+    #[test]
+    fn test_round_trip_simple() {
+        use crate::interpret::morse_interpret;
+        use crate::types::{MorseInterpretParams, MorseTimingParams};
+
+        let original_text = "E";
+        let timing_params = MorseTimingParams::default();
+        let interpret_params = MorseInterpretParams::default();
+
+        // Text -> Timing Elements
+        let elements = generate_morse_timing(original_text, &timing_params).unwrap();
+
+        // Timing Elements -> Signals
+        let signals = timing_elements_to_signals(&elements);
+
+        // Signals -> Text
+        let result = morse_interpret(&signals, &interpret_params).unwrap();
+
+        assert_eq!(result.text, original_text);
+        assert!(result.confidence > 0.8);
+    }
+
+    #[test]
+    fn test_round_trip_word() {
+        use crate::interpret::morse_interpret;
+        use crate::types::{MorseInterpretParams, MorseTimingParams};
+
+        let original_text = "HELLO";
+        let timing_params = MorseTimingParams::default();
+        let interpret_params = MorseInterpretParams::default();
+
+        // Text -> Timing Elements
+        let elements = generate_morse_timing(original_text, &timing_params).unwrap();
+
+        // Timing Elements -> Signals
+        let signals = timing_elements_to_signals(&elements);
+
+        // Signals -> Text
+        let result = morse_interpret(&signals, &interpret_params).unwrap();
+
+        assert_eq!(result.text, original_text);
+        assert!(result.confidence > 0.8);
+    }
+
+    #[test]
+    fn test_round_trip_with_spaces() {
+        use crate::interpret::morse_interpret;
+        use crate::types::{MorseInterpretParams, MorseTimingParams};
+
+        let original_text = "HI THERE";
+        let timing_params = MorseTimingParams::default();
+        let interpret_params = MorseInterpretParams::default();
+
+        // Text -> Timing Elements
+        let elements = generate_morse_timing(original_text, &timing_params).unwrap();
+
+        // Timing Elements -> Signals
+        let signals = timing_elements_to_signals(&elements);
+
+        // Signals -> Text
+        let result = morse_interpret(&signals, &interpret_params).unwrap();
+
+        assert_eq!(result.text, original_text);
+        assert!(result.confidence > 0.7);
+    }
+
+    #[test]
+    fn test_round_trip_numbers_punctuation() {
+        use crate::interpret::morse_interpret;
+        use crate::types::{MorseInterpretParams, MorseTimingParams};
+
+        let original_text = "ABC123.?!";
+        let timing_params = MorseTimingParams::default();
+        let interpret_params = MorseInterpretParams::default();
+
+        // Text -> Timing Elements
+        let elements = generate_morse_timing(original_text, &timing_params).unwrap();
+
+        // Timing Elements -> Signals
+        let signals = timing_elements_to_signals(&elements);
+
+        // Signals -> Text
+        let result = morse_interpret(&signals, &interpret_params).unwrap();
+
+        assert_eq!(result.text, original_text);
+        assert!(result.confidence > 0.7);
+    }
+
+    #[test]
+    fn test_round_trip_long_text() {
+        use crate::interpret::morse_interpret;
+        use crate::types::{MorseInterpretParams, MorseTimingParams};
+
+        let original_text = "THE QUICK BROWN FOX JUMPS OVER THE LAZY DOG 1234567890";
+        let timing_params = MorseTimingParams::default();
+        let interpret_params = MorseInterpretParams::default();
+
+        // Text -> Timing Elements
+        let elements = generate_morse_timing(original_text, &timing_params).unwrap();
+
+        // Timing Elements -> Signals
+        let signals = timing_elements_to_signals(&elements);
+
+        // Signals -> Text
+        let result = morse_interpret(&signals, &interpret_params).unwrap();
+
+        assert_eq!(result.text, original_text);
+        assert!(result.confidence > 0.7);
+    }
+
+    #[test]
+    fn test_round_trip_short_text() {
+        use crate::interpret::morse_interpret;
+        use crate::types::{MorseInterpretParams, MorseTimingParams};
+
+        // Test single characters and very short words
+        let test_cases = ["A", "S", "O", "SOS", "HI", "OK"];
+
+        let timing_params = MorseTimingParams::default();
+        let interpret_params = MorseInterpretParams::default();
+
+        for original_text in &test_cases {
+            // Text -> Timing Elements
+            let elements = generate_morse_timing(original_text, &timing_params).unwrap();
+
+            // Timing Elements -> Signals
+            let signals = timing_elements_to_signals(&elements);
+
+            // Signals -> Text
+            let result = morse_interpret(&signals, &interpret_params).unwrap();
+
+            assert_eq!(
+                result.text, *original_text,
+                "Failed for text: {}",
+                original_text
+            );
+            assert!(
+                result.confidence > 0.7,
+                "Low confidence for text: {}",
+                original_text
+            );
+        }
+    }
+
+    #[test]
+    fn test_morse_interpret_with_noise() {
+        use crate::interpret::morse_interpret;
+        use crate::types::{MorseInterpretParams, MorseSignal};
+
+        let params = MorseInterpretParams::default();
+
+        // Test 'E' with noise (hardcoded noise threshold of 0.01)
+        let signals = vec![
+            MorseSignal {
+                on: true,
+                seconds: 0.005,
+            }, // noise - should be filtered
+            MorseSignal {
+                on: false,
+                seconds: 0.008,
+            }, // noise - should be filtered
+            MorseSignal {
+                on: true,
+                seconds: 0.1,
+            }, // dot
+            MorseSignal {
+                on: false,
+                seconds: 0.3,
+            }, // character gap
+        ];
+
+        let result = morse_interpret(&signals, &params).unwrap();
+        assert_eq!(result.text, "E");
+        assert_eq!(result.signals_processed, 2); // Only non-noise signals
     }
 }

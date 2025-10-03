@@ -477,18 +477,31 @@
         function updateDisplay() {
             // Update signals display with visual representation
             let display = '';
-            let signalIndex = 0;
 
-            for (const signal of signals) {
+            for (let i = 0; i < signals.length; i++) {
+                const signal = signals[i];
+
                 if (signal.on) {
                     const durationMs = signal.seconds * 1000; // Convert to ms
                     const isDot = durationMs < DOT_THRESHOLD;
-                    display += isDot ? '• ' : '− ';
+                    display += isDot ? '•' : '−';
                 } else {
-                    // Show gaps as spaces (visual separation)
-                    display += ' ';
+                    // Classify gap types based on duration for visual spacing
+                    const gapMs = signal.seconds * 1000;
+
+                    // Rough gap classification based on typical morse timing
+                    // These thresholds are estimates for visual display purposes
+                    if (gapMs < 200) {
+                        // Short gap - intra-character (between dots/dashes within a letter)
+                        display += ' ';
+                    } else if (gapMs < 600) {
+                        // Medium gap - inter-character (between letters)
+                        display += '   '; // 3 spaces
+                    } else {
+                        // Long gap - inter-word (between words)
+                        display += '       '; // 7 spaces
+                    }
                 }
-                signalIndex++;
             }
 
             signalsDisplay.textContent = display || 'Morse signals will appear here...';
@@ -508,7 +521,7 @@
             try {
                 updateStatus('Interpreting morse code...');
 
-                const result = interpretMorseSignals({ signals });
+                const result = interpretMorseSignals(signals);
 
                 // Update display with results
                 translation.textContent = result.text || '(No translation)';
