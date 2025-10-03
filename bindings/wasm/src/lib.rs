@@ -4,6 +4,8 @@ use morse_core::{audio, timing};
 use js_sys::Array;
 use wasm_bindgen::prelude::*;
 
+mod support;
+
 // Console logging for debugging
 #[wasm_bindgen]
 extern "C" {
@@ -135,14 +137,8 @@ impl MorseAudioResult {
 
 #[wasm_bindgen]
 pub fn generate_morse_timing(text: &str, config_json: &str) -> Result<MorseTimingResult, JsValue> {
-    // Start with defaults, then overlay any provided config
-    let params = if config_json.trim().is_empty() || config_json == "{}" {
-        MorseTimingParams::default()
-    } else {
-        serde_json::from_str::<MorseTimingParams>(config_json)
-            .unwrap_or_else(|_| MorseTimingParams::default())
-    };
-
+    let params = support::parse_with_defaults::<MorseTimingParams>(config_json);
+    
     timing::morse_timing(text, &params)
         .map(|elements| MorseTimingResult { elements })
         .map_err(|e| JsValue::from_str(&e))
@@ -150,7 +146,7 @@ pub fn generate_morse_timing(text: &str, config_json: &str) -> Result<MorseTimin
 
 #[wasm_bindgen]
 pub fn generate_morse_audio(text: &str, config_json: &str) -> Result<MorseAudioResult, JsValue> {
-    // Parse JSON into a generic Value first
+    // Parse JSON into a generic Value first for manual discriminated union handling
     let config_value: serde_json::Value = if config_json.trim().is_empty() || config_json == "{}" {
         serde_json::Value::Object(serde_json::Map::new())
     } else {
@@ -161,7 +157,7 @@ pub fn generate_morse_audio(text: &str, config_json: &str) -> Result<MorseAudioR
     // Debug: log the raw JSON received
     log(&format!("WASM RAW JSON: {}", config_json));
 
-    // Extract timing and audio parameters using serde
+    // Extract timing parameters using our helper
     let timing_params: MorseTimingParams = serde_json::from_value(config_value.clone())
         .unwrap_or_else(|_| MorseTimingParams::default());
 
@@ -310,13 +306,8 @@ pub fn interpret_morse_signals(
     let signals: Vec<morse_core::types::MorseSignal> = serde_json::from_str(signals_json)
         .map_err(|e| JsValue::from_str(&format!("Invalid signals JSON: {}", e)))?;
 
-    // Parse config from JSON, with defaults
-    let params = if config_json.trim().is_empty() || config_json == "{}" {
-        morse_core::types::MorseInterpretParams::default()
-    } else {
-        serde_json::from_str::<morse_core::types::MorseInterpretParams>(config_json)
-            .unwrap_or_else(|_| morse_core::types::MorseInterpretParams::default())
-    };
+    // Parse config with defaults
+    let params = support::parse_with_defaults::<morse_core::types::MorseInterpretParams>(config_json);
 
     // Use the morse interpret function from our interpret module
     let result =
