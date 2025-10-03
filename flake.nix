@@ -1,13 +1,18 @@
 {
-  description = "dahdit dev shell (make + gcc)";
+  description = "dahdit dev shell (Rust + WASM)";
 
-  inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+  inputs = {
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+    rust-overlay.url = "github:oxalica/rust-overlay";
+  };
 
-  outputs = { self, nixpkgs }:
+  outputs = { self, nixpkgs, rust-overlay }:
   let
     systems = [ "x86_64-linux" "aarch64-linux" "x86_64-darwin" "aarch64-darwin" ];
     forAllSystems = f: nixpkgs.lib.genAttrs systems (system:
-      let pkgs = import nixpkgs { inherit system; };
+      let
+        overlays = [ (import rust-overlay) ];
+        pkgs = import nixpkgs { inherit system overlays; };
       in f pkgs
     );
   in {
@@ -17,6 +22,11 @@
           pkgs.gnumake
           pkgs.gcc
           pkgs.emscripten
+          (pkgs.rust-bin.stable.latest.default.override {
+            targets = [ "wasm32-unknown-unknown" ];
+          })
+          pkgs.wasm-pack
+          pkgs.nodejs
         ];
       };
     });

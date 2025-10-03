@@ -338,7 +338,7 @@
     <div id="status">Ready! Enter text and click Play.</div>
 
     <script type="module">
-        import { generateMorseAudio, playMorseAudio, ready, AUDIO_MODE, WAVEFORM_TYPE } from './bindings/javascript/morse.js';
+        import { generateMorseAudio, playMorseAudio, MorseAudioMode, MorseWaveformType } from './bindings/javascript/wrapper/morse.js';
 
         let currentSource = null;
         let lastGeneratedAudio = null;
@@ -446,7 +446,7 @@
                 });
             };
 
-            if (audioMode === AUDIO_MODE.RADIO) {
+            if (audioMode === MorseAudioMode.Radio) {
                 toggleGroup(radioElements, true);
                 toggleGroup(telegraphElements, false);
             } else {
@@ -516,11 +516,11 @@
             };
 
             // Add mode-specific parameters
-            if (audioMode === AUDIO_MODE.RADIO) {
+            if (audioMode === MorseAudioMode.Radio) {
                 params.frequency = parseInt(document.getElementById('frequency').value);
                 params.waveformType = parseInt(document.getElementById('waveform').value);
                 params.backgroundStaticLevel = parseFloat(document.getElementById('backgroundStatic').value) / 100;
-            } else if (audioMode === AUDIO_MODE.TELEGRAPH) {
+            } else if (audioMode === MorseAudioMode.Telegraph) {
                 params.clickSharpness = parseFloat(document.getElementById('clickSharpness').value) / 100;
                 params.resonanceFreq = parseFloat(document.getElementById('resonanceFreq').value);
                 params.decayRate = parseFloat(document.getElementById('decayRate').value);
@@ -574,7 +574,7 @@
             }
         });
 
-        // Initialize slider displays and mode visibility
+        // Initialize UI
         updateSliderDisplays();
         updateModeVisibility();
     </script>

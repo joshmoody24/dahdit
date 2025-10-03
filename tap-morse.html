@@ -247,10 +247,8 @@
     </div>
 
     <script type="module">
-        import { interpretMorseSignals, ready } from './bindings/javascript/morse.js';
+        import { interpretMorseSignals } from './bindings/javascript/wrapper/morse.js';
 
-        // Wait for WASM module to load
-        await ready;
 
         // State management
         let signals = [];

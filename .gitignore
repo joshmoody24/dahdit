@@ -1,8 +1,23 @@
 *.wav
+
+# Legacy C build artifacts (no longer used)
 *.o
-
-core/morse
-core/test-runner
-
 bindings/javascript/morse-wasm.wasm
 bindings/javascript/morse-wasm.js
+
+# Rust build artifacts
+/target/
+core/target/
+
+# Generated WASM files (built by wasm-pack)
+bindings/javascript/wasm-core/
+
+# Node.js dependencies
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# OS files
+.DS_Store
+Thumbs.db
