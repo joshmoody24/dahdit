@@ -21,6 +21,9 @@ features = ["derive"]
 [dependencies.serde_json]
 version = "1.0"
 
+[dependencies.serde_repr]
+version = "0.1"
+
 [dev-dependencies]
 wasm-bindgen-test = "0.3"
 

@@ -96,107 +96,21 @@ pub fn generate_morse_timing(text: &str, config_json: &str) -> Result<MorseTimin
 
 #[wasm_bindgen]
 pub fn generate_morse_audio(text: &str, config_json: &str) -> Result<MorseAudioResult, JsValue> {
-    // Parse JSON into a generic Value first
-    let config_value: serde_json::Value = if config_json.trim().is_empty() || config_json == "{}" {
-        serde_json::Value::Object(serde_json::Map::new())
+    // Parse timing parameters using serde
+    let timing_params = if config_json.trim().is_empty() || config_json == "{}" {
+        MorseTimingParams::default()
     } else {
-        serde_json::from_str(config_json)
-            .unwrap_or_else(|_| serde_json::Value::Object(serde_json::Map::new()))
+        serde_json::from_str::<MorseTimingParams>(config_json)
+            .unwrap_or_else(|_| MorseTimingParams::default())
     };
 
-    // Debug: log the raw JSON received
-    log(&format!("WASM RAW JSON: {}", config_json));
-
-    // Extract timing and audio parameters using serde
-    let timing_params: MorseTimingParams = serde_json::from_value(config_value.clone())
-        .unwrap_or_else(|_| MorseTimingParams::default());
-
-    // Parse audio parameters manually for discriminated union support
-    let mut audio_params = MorseAudioParams::default();
-
-    // Parse common parameters
-    if let Some(volume) = config_value.get("volume") {
-        if let Some(vol) = volume.as_f64() {
-            audio_params.volume = vol as f32;
-        }
-    }
-    if let Some(sample_rate) = config_value.get("sampleRate") {
-        if let Some(sr) = sample_rate.as_i64() {
-            audio_params.sample_rate = sr as i32;
-        }
-    }
-    if let Some(audio_mode) = config_value.get("audioMode") {
-        if let Some(mode) = audio_mode.as_i64() {
-            audio_params.audio_mode = if mode == 1 {
-                crate::types::MorseAudioMode::Telegraph
-            } else {
-                crate::types::MorseAudioMode::Radio
-            };
-        }
-    }
-
-    // Parse mode-specific parameters based on audioMode
-    match audio_params.audio_mode {
-        crate::types::MorseAudioMode::Radio => {
-            if let Some(freq_hz) = config_value.get("freqHz") {
-                if let Some(freq) = freq_hz.as_f64() {
-                    audio_params.radio_params.freq_hz = freq as f32;
-                }
-            }
-            if let Some(waveform_type) = config_value.get("waveformType") {
-                if let Some(wt) = waveform_type.as_i64() {
-                    audio_params.radio_params.waveform_type = match wt {
-                        1 => crate::types::MorseWaveformType::Square,
-                        2 => crate::types::MorseWaveformType::Sawtooth,
-                        3 => crate::types::MorseWaveformType::Triangle,
-                        _ => crate::types::MorseWaveformType::Sine,
-                    };
-                }
-            }
-            if let Some(bg_static) = config_value.get("backgroundStaticLevel") {
-                if let Some(bg) = bg_static.as_f64() {
-                    audio_params.radio_params.background_static_level = bg as f32;
-                }
-            }
-        }
-        crate::types::MorseAudioMode::Telegraph => {
-            if let Some(click_sharpness) = config_value.get("clickSharpness") {
-                if let Some(cs) = click_sharpness.as_f64() {
-                    audio_params.telegraph_params.click_sharpness = cs as f32;
-                }
-            }
-            if let Some(resonance_freq) = config_value.get("resonanceFreq") {
-                if let Some(rf) = resonance_freq.as_f64() {
-                    audio_params.telegraph_params.resonance_freq = rf as f32;
-                }
-            }
-            if let Some(decay_rate) = config_value.get("decayRate") {
-                if let Some(dr) = decay_rate.as_f64() {
-                    audio_params.telegraph_params.decay_rate = dr as f32;
-                }
-            }
-            if let Some(mechanical_noise) = config_value.get("mechanicalNoise") {
-                if let Some(mn) = mechanical_noise.as_f64() {
-                    audio_params.telegraph_params.mechanical_noise = mn as f32;
-                }
-            }
-            if let Some(solenoid_response) = config_value.get("solenoidResponse") {
-                if let Some(sr) = solenoid_response.as_f64() {
-                    audio_params.telegraph_params.solenoid_response = sr as f32;
-                }
-            }
-            if let Some(room_tone_level) = config_value.get("roomToneLevel") {
-                if let Some(rtl) = room_tone_level.as_f64() {
-                    audio_params.telegraph_params.room_tone_level = rtl as f32;
-                }
-            }
-            if let Some(reverb_amount) = config_value.get("reverbAmount") {
-                if let Some(ra) = reverb_amount.as_f64() {
-                    audio_params.telegraph_params.reverb_amount = ra as f32;
-                }
-            }
-        }
-    }
+    // Parse audio parameters using serde
+    let audio_params = if config_json.trim().is_empty() || config_json == "{}" {
+        MorseAudioParams::default()
+    } else {
+        serde_json::from_str::<MorseAudioParams>(config_json)
+            .unwrap_or_else(|_| MorseAudioParams::default())
+    };
 
     // Generate timing elements
     let timing_elements =
@@ -274,4 +188,56 @@ pub fn interpret_morse_signals(
         signals_processed: result.signals_processed,
         patterns_recognized: result.patterns_recognized,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_audio_params_json_deserialization() {
+        // Test with empty JSON - should use defaults
+        let json = "{}";
+        let params: MorseAudioParams = serde_json::from_str(json).unwrap();
+        assert_eq!(params.sample_rate, 44100);
+        assert_eq!(params.volume, 0.5);
+        assert_eq!(params.audio_mode, MorseAudioMode::Radio);
+
+        // Test with partial JSON - should merge with defaults
+        let json = r#"{"volume": 0.8, "sampleRate": 48000}"#;
+        let params: MorseAudioParams = serde_json::from_str(json).unwrap();
+        assert_eq!(params.sample_rate, 48000);
+        assert_eq!(params.volume, 0.8);
+        assert_eq!(params.audio_mode, MorseAudioMode::Radio); // default
+
+        // Test with radio mode parameters
+        let json = r#"{"audioMode": 0, "freqHz": 880, "waveformType": 1}"#;
+        let params: MorseAudioParams = serde_json::from_str(json).unwrap();
+        assert_eq!(params.audio_mode, MorseAudioMode::Radio);
+        assert_eq!(params.radio_params.freq_hz, 880.0);
+        assert_eq!(params.radio_params.waveform_type, MorseWaveformType::Square);
+
+        // Test with telegraph mode parameters
+        let json = r#"{"audioMode": 1, "clickSharpness": 0.7, "resonanceFreq": 1000}"#;
+        let params: MorseAudioParams = serde_json::from_str(json).unwrap();
+        assert_eq!(params.audio_mode, MorseAudioMode::Telegraph);
+        assert_eq!(params.telegraph_params.click_sharpness, 0.7);
+        assert_eq!(params.telegraph_params.resonance_freq, 1000.0);
+    }
+
+    #[test]
+    fn test_timing_params_json_deserialization() {
+        // Test with empty JSON - should use defaults
+        let json = "{}";
+        let params: MorseTimingParams = serde_json::from_str(json).unwrap();
+        assert_eq!(params.wpm, 20);
+        assert_eq!(params.word_gap_multiplier, 1.0);
+
+        // Test with partial JSON
+        let json = r#"{"wpm": 30, "humanizationFactor": 0.2}"#;
+        let params: MorseTimingParams = serde_json::from_str(json).unwrap();
+        assert_eq!(params.wpm, 30);
+        assert_eq!(params.humanization_factor, 0.2);
+        assert_eq!(params.word_gap_multiplier, 1.0); // default
+    }
 }
