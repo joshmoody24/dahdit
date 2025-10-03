@@ -1,7 +1,5 @@
 use serde::{Deserialize, Serialize};
-use wasm_bindgen::prelude::*;
 
-#[wasm_bindgen]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum MorseElementType {
     Dot = 0,
@@ -15,14 +13,12 @@ pub struct MorseElement {
     pub duration_seconds: f32,
 }
 
-#[wasm_bindgen]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum MorseAudioMode {
     Radio = 0,
     Telegraph = 1,
 }
 
-#[wasm_bindgen]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum MorseWaveformType {
     Sine = 0,

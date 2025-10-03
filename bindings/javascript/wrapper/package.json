@@ -12,11 +12,11 @@
   "scripts": {
     "test": "node test.js",
     "build": "npm run build:wasm && npm install",
-    "build:wasm": "cd ../../../core && wasm-pack build --target web --out-dir ../bindings/javascript/wasm-core",
+    "build:wasm": "cd ../../wasm && wasm-pack build --target web --out-dir ../javascript/wasm-core",
     "clean": "rm -rf ../wasm-core",
     "format": "npx prettier --write *.js"
   },
   "dependencies": {
-    "morse-core": "file:../wasm-core"
+    "morse-wasm": "file:../wasm-core"
   }
 }

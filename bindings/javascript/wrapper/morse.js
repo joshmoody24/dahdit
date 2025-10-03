@@ -7,9 +7,9 @@ const isNode = typeof process !== "undefined" && process.versions?.node;
 // Import WASM module based on environment
 let wasmModule;
 if (isNode) {
-  wasmModule = await import("morse-core");
+  wasmModule = await import("morse-wasm");
 } else {
-  wasmModule = await import("../wasm-core/morse_core.js");
+  wasmModule = await import("../wasm-core/morse_wasm.js");
 }
 
 // Extract what we need from WASM module
@@ -29,7 +29,7 @@ if (isNode) {
   const path = await import("path");
   const { fileURLToPath } = await import("url");
   const __dirname = path.dirname(fileURLToPath(import.meta.url));
-  const wasmPath = path.join(__dirname, "../wasm-core/morse_core_bg.wasm");
+  const wasmPath = path.join(__dirname, "../wasm-core/morse_wasm_bg.wasm");
   const wasmBytes = fs.readFileSync(wasmPath);
   await wasmInit(wasmBytes);
 } else {
