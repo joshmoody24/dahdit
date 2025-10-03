@@ -81,6 +81,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "morse-wasm"
+version = "1.0.0"
+dependencies = [
+ "js-sys",
+ "morse-core",
+ "serde",
+ "serde_json",
+ "wasm-bindgen",
+ "wasm-bindgen-test",
+ "web-sys",
+]
+
+[[package]]
 name = "once_cell"
 version = "1.21.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"

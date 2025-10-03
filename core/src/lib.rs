@@ -13,12 +13,6 @@ pub use interpret::morse_interpret;
 pub use timing::{morse_timing, morse_timing_size};
 pub use types::*;
 
-#[cfg(feature = "wasm")]
-pub mod wasm;
-
-#[cfg(feature = "wasm")]
-pub use wasm::*;
-
 // Public API for direct Rust usage
 pub fn generate_morse_timing(
     text: &str,

@@ -1,6 +1,6 @@
 // WebAssembly bindings to maintain JavaScript API compatibility
-use crate::types::*;
-use crate::{audio, timing};
+use morse_core::types::*;
+use morse_core::{audio, timing};
 use js_sys::Array;
 use wasm_bindgen::prelude::*;
 
@@ -14,6 +14,64 @@ extern "C" {
 #[allow(unused_macros)]
 macro_rules! console_log {
     ($($t:tt)*) => (log(&format_args!($($t)*).to_string()))
+}
+
+// Re-export enums with wasm_bindgen for JavaScript compatibility
+#[wasm_bindgen]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MorseAudioMode {
+    Radio = 0,
+    Telegraph = 1,
+}
+
+#[wasm_bindgen]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MorseWaveformType {
+    Sine = 0,
+    Square = 1,
+    Sawtooth = 2,
+    Triangle = 3,
+}
+
+// Convert from core types to wasm types
+impl From<morse_core::types::MorseAudioMode> for MorseAudioMode {
+    fn from(mode: morse_core::types::MorseAudioMode) -> Self {
+        match mode {
+            morse_core::types::MorseAudioMode::Radio => MorseAudioMode::Radio,
+            morse_core::types::MorseAudioMode::Telegraph => MorseAudioMode::Telegraph,
+        }
+    }
+}
+
+impl From<MorseAudioMode> for morse_core::types::MorseAudioMode {
+    fn from(mode: MorseAudioMode) -> Self {
+        match mode {
+            MorseAudioMode::Radio => morse_core::types::MorseAudioMode::Radio,
+            MorseAudioMode::Telegraph => morse_core::types::MorseAudioMode::Telegraph,
+        }
+    }
+}
+
+impl From<morse_core::types::MorseWaveformType> for MorseWaveformType {
+    fn from(wf: morse_core::types::MorseWaveformType) -> Self {
+        match wf {
+            morse_core::types::MorseWaveformType::Sine => MorseWaveformType::Sine,
+            morse_core::types::MorseWaveformType::Square => MorseWaveformType::Square,
+            morse_core::types::MorseWaveformType::Sawtooth => MorseWaveformType::Sawtooth,
+            morse_core::types::MorseWaveformType::Triangle => MorseWaveformType::Triangle,
+        }
+    }
+}
+
+impl From<MorseWaveformType> for morse_core::types::MorseWaveformType {
+    fn from(wf: MorseWaveformType) -> Self {
+        match wf {
+            MorseWaveformType::Sine => morse_core::types::MorseWaveformType::Sine,
+            MorseWaveformType::Square => morse_core::types::MorseWaveformType::Square,
+            MorseWaveformType::Sawtooth => morse_core::types::MorseWaveformType::Sawtooth,
+            MorseWaveformType::Triangle => morse_core::types::MorseWaveformType::Triangle,
+        }
+    }
 }
 
 // JavaScript-compatible result type
@@ -128,16 +186,16 @@ pub fn generate_morse_audio(text: &str, config_json: &str) -> Result<MorseAudioR
     if let Some(audio_mode) = config_value.get("audioMode") {
         if let Some(mode) = audio_mode.as_i64() {
             audio_params.audio_mode = if mode == 1 {
-                crate::types::MorseAudioMode::Telegraph
+                morse_core::types::MorseAudioMode::Telegraph
             } else {
-                crate::types::MorseAudioMode::Radio
+                morse_core::types::MorseAudioMode::Radio
             };
         }
     }
 
     // Parse mode-specific parameters based on audioMode
     match audio_params.audio_mode {
-        crate::types::MorseAudioMode::Radio => {
+        morse_core::types::MorseAudioMode::Radio => {
             if let Some(freq_hz) = config_value.get("freqHz") {
                 if let Some(freq) = freq_hz.as_f64() {
                     audio_params.radio_params.freq_hz = freq as f32;
@@ -146,10 +204,10 @@ pub fn generate_morse_audio(text: &str, config_json: &str) -> Result<MorseAudioR
             if let Some(waveform_type) = config_value.get("waveformType") {
                 if let Some(wt) = waveform_type.as_i64() {
                     audio_params.radio_params.waveform_type = match wt {
-                        1 => crate::types::MorseWaveformType::Square,
-                        2 => crate::types::MorseWaveformType::Sawtooth,
-                        3 => crate::types::MorseWaveformType::Triangle,
-                        _ => crate::types::MorseWaveformType::Sine,
+                        1 => morse_core::types::MorseWaveformType::Square,
+                        2 => morse_core::types::MorseWaveformType::Sawtooth,
+                        3 => morse_core::types::MorseWaveformType::Triangle,
+                        _ => morse_core::types::MorseWaveformType::Sine,
                     };
                 }
             }
@@ -159,7 +217,7 @@ pub fn generate_morse_audio(text: &str, config_json: &str) -> Result<MorseAudioR
                 }
             }
         }
-        crate::types::MorseAudioMode::Telegraph => {
+        morse_core::types::MorseAudioMode::Telegraph => {
             if let Some(click_sharpness) = config_value.get("clickSharpness") {
                 if let Some(cs) = click_sharpness.as_f64() {
                     audio_params.telegraph_params.click_sharpness = cs as f32;
@@ -253,20 +311,20 @@ pub fn interpret_morse_signals(
     config_json: &str,
 ) -> Result<MorseInterpretResultJs, JsValue> {
     // Parse signals from JSON
-    let signals: Vec<crate::types::MorseSignal> = serde_json::from_str(signals_json)
+    let signals: Vec<morse_core::types::MorseSignal> = serde_json::from_str(signals_json)
         .map_err(|e| JsValue::from_str(&format!("Invalid signals JSON: {}", e)))?;
 
     // Parse config from JSON, with defaults
     let params = if config_json.trim().is_empty() || config_json == "{}" {
-        crate::types::MorseInterpretParams::default()
+        morse_core::types::MorseInterpretParams::default()
     } else {
-        serde_json::from_str::<crate::types::MorseInterpretParams>(config_json)
-            .unwrap_or_else(|_| crate::types::MorseInterpretParams::default())
+        serde_json::from_str::<morse_core::types::MorseInterpretParams>(config_json)
+            .unwrap_or_else(|_| morse_core::types::MorseInterpretParams::default())
     };
 
     // Use the morse interpret function from our interpret module
     let result =
-        crate::interpret::morse_interpret(&signals, &params).map_err(|e| JsValue::from_str(&e))?;
+        morse_core::interpret::morse_interpret(&signals, &params).map_err(|e| JsValue::from_str(&e))?;
 
     Ok(MorseInterpretResultJs {
         text: result.text,
