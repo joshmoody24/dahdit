@@ -129,19 +129,14 @@ pub struct MorseSignal {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
 pub struct MorseInterpretParams {
-    pub max_k_means_iterations: i32,
-    pub convergence_threshold: f32,
-    pub noise_threshold: f32,
     pub max_output_length: i32,
 }
 
 impl Default for MorseInterpretParams {
     fn default() -> Self {
         Self {
-            max_k_means_iterations: 100,
-            convergence_threshold: 0.001,
-            noise_threshold: 0.001,
             max_output_length: 1000,
         }
     }

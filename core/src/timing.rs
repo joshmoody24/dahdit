@@ -16,12 +16,13 @@ struct SimpleRng {
 
 impl SimpleRng {
     fn new(seed: u32) -> Self {
-        // Use current time if seed is 0
+        // Use current time if seed is 0, with fallback for WASM
         let actual_seed = if seed == 0 {
+            // Try to use system time, fallback to fixed seed for WASM
             SystemTime::now()
                 .duration_since(UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_secs() as u32
+                .map(|d| d.as_secs() as u32)
+                .unwrap_or(12345) // Fixed fallback seed for WASM
         } else {
             seed
         };
