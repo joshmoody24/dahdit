@@ -197,7 +197,17 @@ MorseInterpretResult morse_interpret(const MorseSignal *signals, size_t signal_c
     return result;
   }
 
-  for (size_t i = 0; i < signal_count; i++) {
+  int start_index = 0;
+  if (signal_count > 0 && !signals[0].on) {
+    start_index = 1;
+  }
+
+  int end_index = signal_count;
+  if (signal_count > 0 && !signals[signal_count - 1].on) {
+    end_index = signal_count - 1;
+  }
+
+  for (size_t i = start_index; i < end_index; i++) {
     if (signals[i].seconds >= params->noise_threshold) {
       if (signals[i].on) {
         on_durations[on_count++] = signals[i].seconds;
@@ -241,38 +251,52 @@ MorseInterpretResult morse_interpret(const MorseSignal *signals, size_t signal_c
   if (off_count > 0) {
     off_assignments = malloc(off_count * sizeof(int));
 
-    float min_gap = off_durations[0], max_gap = off_durations[0];
-    for (int i = 1; i < off_count; i++) {
-      if (off_durations[i] < min_gap) min_gap = off_durations[i];
-      if (off_durations[i] > max_gap) max_gap = off_durations[i];
-    }
-
-    if (max_gap / min_gap <= 1.5f) {
-      off_clusters = 1;
-      off_centroids[0] = (min_gap + max_gap) / 2.0f;
-      for (int i = 0; i < off_count; i++) {
-        off_assignments[i] = 0;
-      }
-    } else {
-      off_clusters = (off_count >= 3) ? 3 : off_count;
-      if (off_assignments && off_clusters > 0) {
+    if (off_count < 3) {
+      off_clusters = off_count;
+      if (off_count > 0) {
         if (!kmeans_cluster(off_durations, off_count, off_clusters, off_assignments, off_centroids, params)) {
-          off_clusters = 0;
+            off_clusters = 0;
         }
       }
+    } else {
+      off_clusters = 3;
+      if (!kmeans_cluster(off_durations, off_count, off_clusters, off_assignments, off_centroids, params)) {
+          off_clusters = 0;
+      }
     }
   }
 
-  size_t text_size = morse_interpret_text_size(signals, signal_count, params);
-  result.text = calloc(text_size, sizeof(char));
+    size_t text_size = morse_interpret_text_size(signals, signal_count, params);
+    result.text = calloc(text_size, sizeof(char));
 
-  if (!result.text) {
-    free(on_durations);
-    free(off_durations);
-    free(on_assignments);
-    free(off_assignments);
-    return result;
-  }
+    if (!result.text) {
+        free(on_durations);
+        free(off_durations);
+        free(on_assignments);
+        free(off_assignments);
+        return result;
+    }
+
+    int effective_off_clusters = off_clusters;
+    if (off_clusters == 3) {
+        float ratio1 = off_centroids[1] / off_centroids[0];
+        float ratio2 = off_centroids[2] / off_centroids[1];
+        const float MERGE_THRESHOLD = 1.9f;
+
+        if (ratio2 < MERGE_THRESHOLD) {
+            effective_off_clusters = 2;
+            for (int i = 0; i < off_count; i++) {
+                if (off_assignments[i] == 2) off_assignments[i] = 1;
+            }
+        }
+
+        if (ratio1 < MERGE_THRESHOLD) {
+            effective_off_clusters = (effective_off_clusters == 2) ? 1 : 2;
+            for (int i = 0; i < off_count; i++) {
+                if (off_assignments[i] == 1) off_assignments[i] = 0;
+            }
+        }
+    }
 
   int on_idx = 0, off_idx = 0;
   int current_pattern[10];
@@ -298,13 +322,13 @@ MorseInterpretResult morse_interpret(const MorseSignal *signals, size_t signal_c
     } else {
       int gap_type = 0;
 
-      if (off_idx < off_count && off_assignments && off_clusters > 0) {
+      if (off_idx < off_count && off_assignments && effective_off_clusters > 0) {
         gap_type = off_assignments[off_idx];
         off_idx++;
       }
 
       if (pattern_length > 0) {
-        if (off_clusters >= 3 && gap_type == 2) {
+        if (effective_off_clusters >= 3 && gap_type == 2) {
           char ch = pattern_to_char(current_pattern, pattern_length);
           if (ch != '?') {
             result.text[text_pos++] = ch;
@@ -312,8 +336,8 @@ MorseInterpretResult morse_interpret(const MorseSignal *signals, size_t signal_c
           }
           result.text[text_pos++] = ' ';
           pattern_length = 0;
-        } else if ((off_clusters >= 2 && gap_type >= 1) ||
-                   (off_clusters == 1 && off_centroids[0] > on_centroids[0] * 2.0f)) {
+        } else if ((effective_off_clusters >= 2 && gap_type >= 1) ||
+                   (effective_off_clusters == 1 && off_centroids[0] > on_centroids[0] * 2.0f)) {
           char ch = pattern_to_char(current_pattern, pattern_length);
           if (ch != '?') {
             result.text[text_pos++] = ch;
