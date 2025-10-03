@@ -24,16 +24,12 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Emscripten
-        uses: mymindstorm/setup-emsdk@v14
-        with:
-          version: 3.1.45
+      - name: Setup Nix
+        uses: cachix/install-nix-action@v24
 
       - name: Build WebAssembly
         run: |
-          cd bindings/javascript
-          make clean
-          make
+          nix develop -c make build
 
       - name: Setup Pages
         uses: actions/configure-pages@v4

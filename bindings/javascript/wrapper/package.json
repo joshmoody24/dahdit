@@ -1,0 +1,22 @@
+{
+  "name": "dahdit",
+  "type": "module",
+  "version": "1.0.0",
+  "description": "Fast Morse code generation and audio synthesis",
+  "license": "MIT",
+  "author": "Josh Moody",
+  "main": "morse.js",
+  "files": [
+    "morse.js"
+  ],
+  "scripts": {
+    "test": "node test.js",
+    "build": "npm run build:wasm && npm install",
+    "build:wasm": "cd ../../../core && wasm-pack build --target web --out-dir ../bindings/javascript/wasm-core",
+    "clean": "rm -rf ../wasm-core",
+    "format": "npx prettier --write *.js"
+  },
+  "dependencies": {
+    "morse-core": "file:../wasm-core"
+  }
+}
