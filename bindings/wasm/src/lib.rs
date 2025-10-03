@@ -16,62 +16,58 @@ macro_rules! console_log {
     ($($t:tt)*) => (log(&format_args!($($t)*).to_string()))
 }
 
+// Macro to generate wasm_bindgen wrapper enums that mirror core enums
+macro_rules! wasm_enum {
+    (
+        $(#[$meta:meta])*
+        $vis:vis enum $name:ident {
+            $($variant:ident = $value:expr),* $(,)?
+        }
+        from $core_type:ty
+    ) => {
+        #[wasm_bindgen]
+        $(#[$meta])*
+        $vis enum $name {
+            $($variant = $value),*
+        }
+
+        impl From<$core_type> for $name {
+            fn from(value: $core_type) -> Self {
+                match value {
+                    $(<$core_type>::$variant => $name::$variant),*
+                }
+            }
+        }
+
+        impl From<$name> for $core_type {
+            fn from(value: $name) -> Self {
+                match value {
+                    $($name::$variant => <$core_type>::$variant),*
+                }
+            }
+        }
+    };
+}
+
 // Re-export enums with wasm_bindgen for JavaScript compatibility
-#[wasm_bindgen]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum MorseAudioMode {
-    Radio = 0,
-    Telegraph = 1,
-}
-
-#[wasm_bindgen]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum MorseWaveformType {
-    Sine = 0,
-    Square = 1,
-    Sawtooth = 2,
-    Triangle = 3,
-}
-
-// Convert from core types to wasm types
-impl From<morse_core::types::MorseAudioMode> for MorseAudioMode {
-    fn from(mode: morse_core::types::MorseAudioMode) -> Self {
-        match mode {
-            morse_core::types::MorseAudioMode::Radio => MorseAudioMode::Radio,
-            morse_core::types::MorseAudioMode::Telegraph => MorseAudioMode::Telegraph,
-        }
+wasm_enum! {
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub enum MorseAudioMode {
+        Radio = 0,
+        Telegraph = 1,
     }
+    from morse_core::types::MorseAudioMode
 }
 
-impl From<MorseAudioMode> for morse_core::types::MorseAudioMode {
-    fn from(mode: MorseAudioMode) -> Self {
-        match mode {
-            MorseAudioMode::Radio => morse_core::types::MorseAudioMode::Radio,
-            MorseAudioMode::Telegraph => morse_core::types::MorseAudioMode::Telegraph,
-        }
+wasm_enum! {
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub enum MorseWaveformType {
+        Sine = 0,
+        Square = 1,
+        Sawtooth = 2,
+        Triangle = 3,
     }
-}
-
-impl From<morse_core::types::MorseWaveformType> for MorseWaveformType {
-    fn from(wf: morse_core::types::MorseWaveformType) -> Self {
-        match wf {
-            morse_core::types::MorseWaveformType::Sine => MorseWaveformType::Sine,
-            morse_core::types::MorseWaveformType::Square => MorseWaveformType::Square,
-            morse_core::types::MorseWaveformType::Sawtooth => MorseWaveformType::Sawtooth,
-            morse_core::types::MorseWaveformType::Triangle => MorseWaveformType::Triangle,
-        }
-    }
-}
-
-impl From<MorseWaveformType> for morse_core::types::MorseWaveformType {
-    fn from(wf: MorseWaveformType) -> Self {
-        match wf {
-            MorseWaveformType::Sine => morse_core::types::MorseWaveformType::Sine,
-            MorseWaveformType::Square => morse_core::types::MorseWaveformType::Square,
-            MorseWaveformType::Sawtooth => morse_core::types::MorseWaveformType::Sawtooth,
-            MorseWaveformType::Triangle => morse_core::types::MorseWaveformType::Triangle,
-        }
-    }
+    from morse_core::types::MorseWaveformType
 }
 
 // JavaScript-compatible result type

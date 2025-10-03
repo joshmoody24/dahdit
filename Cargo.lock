@@ -72,12 +72,8 @@ dependencies = [
 name = "morse-core"
 version = "1.0.0"
 dependencies = [
- "js-sys",
  "serde",
  "serde_json",
- "wasm-bindgen",
- "wasm-bindgen-test",
- "web-sys",
 ]
 
 [[package]]
