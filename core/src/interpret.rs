@@ -1,4 +1,3 @@
-use crate::patterns::get_morse_pattern;
 use crate::types::*;
 use std::f32::consts::PI;
 
@@ -160,6 +159,147 @@ impl ProbabilisticTimingModel {
     }
 }
 
+// ===== PHASE 2: MORSE TRIE + LETTER COMPLETION =====
+
+/// Morse trie node for efficient pattern matching
+#[derive(Debug, Clone)]
+struct TrieNode {
+    /// Index to next node on dot (0 = no transition)
+    next_dot: u16,
+    /// Index to next node on dash (0 = no transition)
+    next_dash: u16,
+    /// Character if this is a terminal node (None = not terminal)
+    terminal: Option<char>,
+}
+
+impl TrieNode {
+    fn new() -> Self {
+        Self {
+            next_dot: 0,
+            next_dash: 0,
+            terminal: None,
+        }
+    }
+}
+
+/// Morse trie for O(1) pattern-to-character lookup
+struct MorseTrie {
+    nodes: Vec<TrieNode>,
+}
+
+impl MorseTrie {
+    /// Build the morse trie from all known patterns
+    fn build() -> Self {
+        let mut trie = Self {
+            nodes: vec![TrieNode::new()], // Root node at index 0
+        };
+
+        // Add all characters, prioritizing uppercase for letters
+        // First pass: add all non-letter characters
+        for ch in 0u8..=255u8 {
+            let char_val = ch as char;
+            if let Some(pattern) = crate::patterns::get_morse_pattern(ch) {
+                if !char_val.is_alphabetic() {
+                    trie.add_pattern(pattern, char_val);
+                }
+            }
+        }
+
+        // Second pass: add uppercase letters (these will be the terminal characters)
+        for ch in b'A'..=b'Z' {
+            if let Some(pattern) = crate::patterns::get_morse_pattern(ch) {
+                trie.add_pattern(pattern, ch as char);
+            }
+        }
+
+        trie
+    }
+
+    /// Add a pattern to the trie
+    fn add_pattern(&mut self, pattern: &[MorseElementType], terminal: char) {
+        let mut current = 0usize; // Start at root
+
+        for &element in pattern {
+            let next_idx = match element {
+                MorseElementType::Dot => {
+                    if self.nodes[current].next_dot == 0 {
+                        // Create new node
+                        self.nodes.push(TrieNode::new());
+                        let new_idx = self.nodes.len() - 1;
+                        self.nodes[current].next_dot = new_idx as u16;
+                        new_idx
+                    } else {
+                        self.nodes[current].next_dot as usize
+                    }
+                }
+                MorseElementType::Dash => {
+                    if self.nodes[current].next_dash == 0 {
+                        // Create new node
+                        self.nodes.push(TrieNode::new());
+                        let new_idx = self.nodes.len() - 1;
+                        self.nodes[current].next_dash = new_idx as u16;
+                        new_idx
+                    } else {
+                        self.nodes[current].next_dash as usize
+                    }
+                }
+                MorseElementType::Gap => {
+                    // Gaps shouldn't appear in patterns
+                    continue;
+                }
+            };
+            current = next_idx;
+        }
+
+        // Mark the final node as terminal
+        self.nodes[current].terminal = Some(terminal);
+    }
+
+    /// Get the next node index given current node and element
+    fn transition(&self, node_idx: u16, element: MorseElementType) -> Option<u16> {
+        if node_idx as usize >= self.nodes.len() {
+            return None;
+        }
+
+        let node = &self.nodes[node_idx as usize];
+        match element {
+            MorseElementType::Dot => {
+                if node.next_dot > 0 {
+                    Some(node.next_dot)
+                } else {
+                    None
+                }
+            }
+            MorseElementType::Dash => {
+                if node.next_dash > 0 {
+                    Some(node.next_dash)
+                } else {
+                    None
+                }
+            }
+            MorseElementType::Gap => None, // Gaps don't cause trie transitions
+        }
+    }
+
+    /// Check if a node is terminal and get its character
+    fn get_terminal(&self, node_idx: u16) -> Option<char> {
+        if node_idx as usize >= self.nodes.len() {
+            return None;
+        }
+        self.nodes[node_idx as usize].terminal
+    }
+
+    /// Root node index
+    const ROOT: u16 = 0;
+}
+
+/// Get the global morse trie (built on first call)
+fn get_morse_trie() -> &'static MorseTrie {
+    use std::sync::OnceLock;
+    static TRIE: OnceLock<MorseTrie> = OnceLock::new();
+    TRIE.get_or_init(MorseTrie::build)
+}
+
 /// Detected timing thresholds for morse interpretation
 /// Only dot_duration is used as initial estimate for TimingTracker
 #[derive(Debug, Clone)]
@@ -295,11 +435,14 @@ enum GapType {
     Word,           // Inter-word gap
 }
 
-/// State machine for parsing morse signals
+/// State machine for parsing morse signals using trie navigation
 #[derive(Debug)]
 enum ParseState {
     Idle,
-    InCharacter(Vec<MorseElementType>),
+    InCharacter {
+        trie_node: u16,                  // Current position in morse trie
+        elements: Vec<MorseElementType>, // Keep for compatibility/debugging
+    },
     BetweenCharacters,
 }
 
@@ -344,24 +487,65 @@ fn parse_morse_signals(
                 // Update probabilistic model with latest timing estimate
                 prob_model = ProbabilisticTimingModel::from_tracker(&timing_tracker);
 
-                // ON signal - add element to current character using probabilistic classification
+                // ON signal - add element to current character using trie navigation
                 let element = prob_model.classify_element_min_cost(signal.seconds);
+                let trie = get_morse_trie();
+
                 match state {
                     ParseState::Idle | ParseState::BetweenCharacters => {
-                        state = ParseState::InCharacter(vec![element]);
+                        // Start new character - try to transition from root
+                        if let Some(next_node) = trie.transition(MorseTrie::ROOT, element) {
+                            state = ParseState::InCharacter {
+                                trie_node: next_node,
+                                elements: vec![element],
+                            };
+                        } else {
+                            // Invalid pattern from root - ignore this signal
+                            continue;
+                        }
                     }
-                    ParseState::InCharacter(ref mut pattern) => {
-                        pattern.push(element);
-
-                        // Prevent patterns from getting too long
-                        if pattern.len() > 7 {
-                            // Force character completion for very long patterns
-                            if let Some(ch) = pattern_to_character(pattern) {
+                    ParseState::InCharacter {
+                        ref mut trie_node,
+                        ref mut elements,
+                    } => {
+                        // Try to advance in the trie
+                        if let Some(next_node) = trie.transition(*trie_node, element) {
+                            *trie_node = next_node;
+                            elements.push(element);
+                        } else {
+                            // Dead end in trie - complete current character if possible
+                            if let Some(ch) = trie.get_terminal(*trie_node) {
                                 result.text.push(ch);
                                 recognized_patterns += 1;
                             }
                             total_patterns += 1;
-                            state = ParseState::Idle;
+
+                            // Start new character with current element
+                            if let Some(new_node) = trie.transition(MorseTrie::ROOT, element) {
+                                state = ParseState::InCharacter {
+                                    trie_node: new_node,
+                                    elements: vec![element],
+                                };
+                            } else {
+                                state = ParseState::Idle;
+                            }
+                        }
+
+                        // Safety check for very long patterns
+                        if let ParseState::InCharacter {
+                            elements,
+                            trie_node,
+                        } = &state
+                        {
+                            if elements.len() > 7 {
+                                // Force completion
+                                if let Some(ch) = trie.get_terminal(*trie_node) {
+                                    result.text.push(ch);
+                                    recognized_patterns += 1;
+                                }
+                                total_patterns += 1;
+                                state = ParseState::Idle;
+                            }
                         }
                     }
                 }
@@ -370,16 +554,20 @@ fn parse_morse_signals(
                 // OFF signal - determine gap type using probabilistic classification
                 let gap_type = prob_model.classify_gap_min_cost(signal.seconds);
                 // Handle state transitions without borrowing conflicts
+                let trie = get_morse_trie();
                 let new_state = match &state {
-                    ParseState::InCharacter(pattern) => {
+                    ParseState::InCharacter {
+                        trie_node,
+                        elements: _,
+                    } => {
                         match gap_type {
                             GapType::IntraCharacter => {
                                 // Stay in character, continue building pattern
                                 None // No state change
                             }
                             GapType::InterCharacter => {
-                                // End of character
-                                if let Some(ch) = pattern_to_character(pattern) {
+                                // End of character - use trie to get character
+                                if let Some(ch) = trie.get_terminal(*trie_node) {
                                     result.text.push(ch);
                                     recognized_patterns += 1;
                                 }
@@ -387,8 +575,8 @@ fn parse_morse_signals(
                                 Some(ParseState::BetweenCharacters)
                             }
                             GapType::Word => {
-                                // End of character and word
-                                if let Some(ch) = pattern_to_character(pattern) {
+                                // End of character and word - use trie to get character
+                                if let Some(ch) = trie.get_terminal(*trie_node) {
                                     result.text.push(ch);
                                     recognized_patterns += 1;
                                 }
@@ -414,8 +602,13 @@ fn parse_morse_signals(
     }
 
     // Handle any remaining pattern in final state
-    if let ParseState::InCharacter(pattern) = state {
-        if let Some(ch) = pattern_to_character(&pattern) {
+    if let ParseState::InCharacter {
+        trie_node,
+        elements: _,
+    } = state
+    {
+        let trie = get_morse_trie();
+        if let Some(ch) = trie.get_terminal(trie_node) {
             result.text.push(ch);
             recognized_patterns += 1;
         }
@@ -432,25 +625,6 @@ fn parse_morse_signals(
     };
 
     result
-}
-
-/// Convert a morse pattern to character using the existing lookup table
-fn pattern_to_character(pattern: &[MorseElementType]) -> Option<char> {
-    // Create reverse lookup map (pattern -> character)
-    // This is inefficient for production but works for prototype
-    for ch in 0u8..=255u8 {
-        if let Some(stored_pattern) = get_morse_pattern(ch) {
-            if stored_pattern.len() == pattern.len()
-                && stored_pattern
-                    .iter()
-                    .zip(pattern.iter())
-                    .all(|(a, b)| a == b)
-            {
-                return Some(ch as char);
-            }
-        }
-    }
-    None
 }
 
 /// Main morse interpretation function
