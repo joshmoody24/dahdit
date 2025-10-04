@@ -1,5 +1,6 @@
 use crate::patterns::get_morse_pattern;
 use crate::types::*;
+use std::f32::consts::PI;
 
 /// Timing statistics for adaptive analysis
 #[derive(Debug, Clone)]
@@ -26,14 +27,144 @@ impl TimingStats {
     }
 }
 
+// ===== PHASE 1: PROBABILISTIC TIMING MODEL =====
+
+/// Log-normal probability density function
+fn ln_pdf_lognormal(d: f32, mu: f32, sigma: f32) -> f32 {
+    // mu and sigma are in log space; returns log-likelihood
+    let x = d.max(1e-6); // Prevent log(0)
+    let ln_x = x.ln();
+    let z = (ln_x - mu) / sigma;
+    let sqrt_2pi = (2.0 * PI).sqrt();
+    -0.5 * z * z - ln_x - (sigma * sqrt_2pi).ln()
+}
+
+/// Online adaptive timing tracker using EWMA
+#[derive(Debug, Clone)]
+struct TimingTracker {
+    ln_t: f32,  // Log of unit time (dot duration)
+    alpha: f32, // EWMA smoothing factor (0.05 - 0.15)
+}
+
+impl TimingTracker {
+    fn new(initial_t: f32) -> Self {
+        Self {
+            ln_t: initial_t.max(1e-6).ln(),
+            alpha: 0.1, // Conservative smoothing
+        }
+    }
+
+    /// Update timing estimate based on an ON signal
+    fn update_from_on_signal(&mut self, duration: f32) {
+        let ln_duration = duration.max(1e-6).ln();
+
+        // Determine if this looks more like 1T or 3T
+        let ln1t_diff = (ln_duration - self.ln_t).abs();
+        let ln3t_diff = (ln_duration - (self.ln_t + 3.0f32.ln())).abs();
+
+        let target_ln_t = if ln1t_diff < ln3t_diff {
+            // Looks like a dot (1T)
+            ln_duration
+        } else {
+            // Looks like a dash (3T) - so T = duration/3
+            ln_duration - 3.0f32.ln()
+        };
+
+        // EWMA update
+        self.ln_t = (1.0 - self.alpha) * self.ln_t + self.alpha * target_ln_t;
+    }
+
+    fn get_ln_t(&self) -> f32 {
+        self.ln_t
+    }
+}
+
+/// Probabilistic timing model using log-normal distributions
+#[derive(Debug, Clone)]
+struct ProbabilisticTimingModel {
+    ln_t: f32,  // Log of unit time
+    sigma: f32, // Log-space standard deviation
+}
+
+impl ProbabilisticTimingModel {
+    fn from_tracker(tracker: &TimingTracker) -> Self {
+        Self {
+            ln_t: tracker.get_ln_t(),
+            sigma: 0.35, // Reasonable default for human timing variation
+        }
+    }
+
+    /// Get costs for classifying ON signals (negative log-likelihood)
+    fn element_costs(&self, duration: f32) -> [(MorseElementType, f32); 2] {
+        let ln_1t = self.ln_t;
+        let ln_3t = self.ln_t + 3.0f32.ln();
+
+        [
+            (
+                MorseElementType::Dot,
+                -ln_pdf_lognormal(duration, ln_1t, self.sigma),
+            ),
+            (
+                MorseElementType::Dash,
+                -ln_pdf_lognormal(duration, ln_3t, self.sigma),
+            ),
+        ]
+    }
+
+    /// Get costs for classifying OFF signals (negative log-likelihood)
+    fn gap_costs(&self, duration: f32) -> [(GapType, f32); 3] {
+        let ln_1t = self.ln_t;
+        let ln_3t = self.ln_t + 3.0f32.ln();
+        let ln_7t = self.ln_t + 7.0f32.ln();
+
+        [
+            (
+                GapType::IntraCharacter,
+                -ln_pdf_lognormal(duration, ln_1t, self.sigma),
+            ),
+            (
+                GapType::InterCharacter,
+                -ln_pdf_lognormal(duration, ln_3t, self.sigma),
+            ),
+            (
+                GapType::Word,
+                -ln_pdf_lognormal(duration, ln_7t, self.sigma),
+            ),
+        ]
+    }
+
+    /// Get minimum cost classification (for compatibility with existing FSM)
+    fn classify_element_min_cost(&self, duration: f32) -> MorseElementType {
+        let costs = self.element_costs(duration);
+        if costs[0].1 <= costs[1].1 {
+            costs[0].0
+        } else {
+            costs[1].0
+        }
+    }
+
+    /// Get minimum cost gap classification (for compatibility with existing FSM)
+    fn classify_gap_min_cost(&self, duration: f32) -> GapType {
+        let costs = self.gap_costs(duration);
+        let mut min_cost = costs[0].1;
+        let mut min_type = costs[0].0;
+
+        for &(gap_type, cost) in &costs[1..] {
+            if cost < min_cost {
+                min_cost = cost;
+                min_type = gap_type;
+            }
+        }
+
+        min_type
+    }
+}
+
 /// Detected timing thresholds for morse interpretation
+/// Only dot_duration is used as initial estimate for TimingTracker
 #[derive(Debug, Clone)]
 struct MorseTimings {
     dot_duration: f32,
-    dash_duration: f32,
-    element_gap: f32,
-    char_gap: f32,
-    word_gap: f32,
 }
 
 impl MorseTimings {
@@ -53,7 +184,7 @@ impl MorseTimings {
             .map(|s| s.seconds)
             .collect();
 
-        let off_durations: Vec<f32> = signals
+        let _off_durations: Vec<f32> = signals
             .iter()
             .filter(|s| !s.on && s.seconds >= NOISE_THRESHOLD)
             .map(|s| s.seconds)
@@ -137,7 +268,7 @@ impl MorseTimings {
             }
         };
 
-        let dash_duration = if !dash_candidates.is_empty() {
+        let _dash_duration = if !dash_candidates.is_empty() {
             TimingStats::new(dash_candidates.clone()).unwrap().median
         } else {
             // No dashes found - use expected duration or scale from dots
@@ -153,90 +284,7 @@ impl MorseTimings {
         let _expected_char_gap = expected_dot_duration * 3.0; // 3 dot durations
         let _expected_word_gap = expected_dot_duration * 7.0; // 7 dot durations
 
-        // Analyze OFF durations for gap detection
-        let (element_gap, char_gap, word_gap) = if !off_durations.is_empty() {
-            // Classify gaps based on prior expectations and observed dot duration
-            let actual_element_gap = dot_duration;
-            let actual_char_gap = dot_duration * 3.0;
-            let actual_word_gap = dot_duration * 7.0;
-
-            // Try to detect 3 distinct gap types using thresholds based on actual dot duration
-            let short_gaps: Vec<f32> = off_durations
-                .iter()
-                .copied()
-                .filter(|&d| d <= actual_element_gap * 2.0)
-                .collect();
-
-            let medium_gaps: Vec<f32> = off_durations
-                .iter()
-                .copied()
-                .filter(|&d| d > actual_element_gap * 2.0 && d <= actual_char_gap * 1.5)
-                .collect();
-
-            let long_gaps: Vec<f32> = off_durations
-                .iter()
-                .copied()
-                .filter(|&d| d > actual_char_gap * 1.5)
-                .collect();
-
-            let element_gap = if !short_gaps.is_empty() {
-                TimingStats::new(short_gaps).unwrap().median
-            } else {
-                actual_element_gap
-            };
-
-            let char_gap = if !medium_gaps.is_empty() {
-                TimingStats::new(medium_gaps).unwrap().median
-            } else {
-                actual_char_gap
-            };
-
-            let word_gap = if !long_gaps.is_empty() {
-                TimingStats::new(long_gaps).unwrap().median
-            } else {
-                actual_word_gap
-            };
-
-            (element_gap, char_gap, word_gap)
-        } else {
-            // Fallback to standard morse ratios based on actual dot duration
-            (dot_duration, dot_duration * 3.0, dot_duration * 7.0)
-        };
-
-        Ok(Self {
-            dot_duration,
-            dash_duration,
-            element_gap,
-            char_gap,
-            word_gap,
-        })
-    }
-
-    /// Classify an ON signal duration
-    fn classify_element(&self, duration: f32) -> MorseElementType {
-        let dot_diff = (duration - self.dot_duration).abs();
-        let dash_diff = (duration - self.dash_duration).abs();
-
-        if dot_diff <= dash_diff {
-            MorseElementType::Dot
-        } else {
-            MorseElementType::Dash
-        }
-    }
-
-    /// Classify an OFF signal duration
-    fn classify_gap(&self, duration: f32) -> GapType {
-        let element_diff = (duration - self.element_gap).abs();
-        let char_diff = (duration - self.char_gap).abs();
-        let word_diff = (duration - self.word_gap).abs();
-
-        if element_diff <= char_diff && element_diff <= word_diff {
-            GapType::IntraCharacter
-        } else if char_diff <= word_diff {
-            GapType::InterCharacter
-        } else {
-            GapType::Word
-        }
+        Ok(Self { dot_duration })
     }
 }
 
@@ -255,7 +303,7 @@ enum ParseState {
     BetweenCharacters,
 }
 
-/// Parse morse signals into text using state machine
+/// Parse morse signals into text using state machine with probabilistic timing
 fn parse_morse_signals(
     signals: &[MorseSignal],
     timings: &MorseTimings,
@@ -274,6 +322,13 @@ fn parse_morse_signals(
 
     const NOISE_THRESHOLD: f32 = 0.01;
 
+    // Initialize adaptive timing tracker with initial estimate from timings
+    let initial_t = timings.dot_duration;
+    let mut timing_tracker = TimingTracker::new(initial_t);
+
+    // Create probabilistic timing model (will be updated as we process signals)
+    let mut prob_model = ProbabilisticTimingModel::from_tracker(&timing_tracker);
+
     for signal in signals {
         if signal.seconds < NOISE_THRESHOLD {
             continue;
@@ -283,8 +338,14 @@ fn parse_morse_signals(
 
         match signal.on {
             true => {
-                // ON signal - add element to current character
-                let element = timings.classify_element(signal.seconds);
+                // Update adaptive timing tracker with ON signal
+                timing_tracker.update_from_on_signal(signal.seconds);
+
+                // Update probabilistic model with latest timing estimate
+                prob_model = ProbabilisticTimingModel::from_tracker(&timing_tracker);
+
+                // ON signal - add element to current character using probabilistic classification
+                let element = prob_model.classify_element_min_cost(signal.seconds);
                 match state {
                     ParseState::Idle | ParseState::BetweenCharacters => {
                         state = ParseState::InCharacter(vec![element]);
@@ -306,8 +367,8 @@ fn parse_morse_signals(
                 }
             }
             false => {
-                // OFF signal - determine gap type
-                let gap_type = timings.classify_gap(signal.seconds);
+                // OFF signal - determine gap type using probabilistic classification
+                let gap_type = prob_model.classify_gap_min_cost(signal.seconds);
                 // Handle state transitions without borrowing conflicts
                 let new_state = match &state {
                     ParseState::InCharacter(pattern) => {
