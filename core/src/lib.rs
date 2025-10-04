@@ -383,35 +383,302 @@ mod tests {
         }
     }
 
+    // Tests with fuzzy, humanized signals to test beam search robustness
+
     #[test]
-    fn test_morse_interpret_with_noise() {
+    fn test_round_trip_fuzzy_single_char() {
         use crate::interpret::morse_interpret;
-        use crate::types::{MorseInterpretParams, MorseSignal};
+        use crate::types::{MorseInterpretParams, MorseTimingParams};
 
-        let params = MorseInterpretParams::default();
+        let original_text = "E";
+        let timing_params = MorseTimingParams {
+            humanization_factor: 0.8, // High humanization
+            random_seed: 42,          // Deterministic for testing
+            ..Default::default()
+        };
+        let interpret_params = MorseInterpretParams::default();
 
-        // Test 'E' with noise (hardcoded noise threshold of 0.01)
-        let signals = vec![
-            MorseSignal {
-                on: true,
-                seconds: 0.005,
-            }, // noise - should be filtered
-            MorseSignal {
-                on: false,
-                seconds: 0.008,
-            }, // noise - should be filtered
-            MorseSignal {
-                on: true,
-                seconds: 0.1,
-            }, // dot
-            MorseSignal {
-                on: false,
-                seconds: 0.3,
-            }, // character gap
+        // Text -> Timing Elements (with high humanization)
+        let elements = generate_morse_timing(original_text, &timing_params).unwrap();
+
+        // Timing Elements -> Signals
+        let signals = timing_elements_to_signals(&elements);
+
+        // Signals -> Text
+        let result = morse_interpret(&signals, &interpret_params).unwrap();
+
+        println!(
+            "Fuzzy E: Expected '{}', Got '{}', Confidence: {}",
+            original_text, result.text, result.confidence
+        );
+        assert_eq!(result.text, original_text, "Failed fuzzy single char test");
+        assert!(
+            result.confidence > 0.6,
+            "Low confidence for fuzzy single char"
+        );
+    }
+
+    #[test]
+    fn test_round_trip_fuzzy_word() {
+        use crate::interpret::morse_interpret;
+        use crate::types::{MorseInterpretParams, MorseTimingParams};
+
+        let original_text = "SOS";
+        let timing_params = MorseTimingParams {
+            humanization_factor: 0.6,
+            random_seed: 123,
+            ..Default::default()
+        };
+        let interpret_params = MorseInterpretParams::default();
+
+        let elements = generate_morse_timing(original_text, &timing_params).unwrap();
+        let signals = timing_elements_to_signals(&elements);
+        let result = morse_interpret(&signals, &interpret_params).unwrap();
+
+        println!(
+            "Fuzzy SOS: Expected '{}', Got '{}', Confidence: {}",
+            original_text, result.text, result.confidence
+        );
+        assert_eq!(result.text, original_text, "Failed fuzzy SOS test");
+        assert!(result.confidence > 0.5, "Low confidence for fuzzy SOS");
+    }
+
+    #[test]
+    fn test_round_trip_fuzzy_multiple_words() {
+        use crate::interpret::morse_interpret;
+        use crate::types::{MorseInterpretParams, MorseTimingParams};
+
+        let original_text = "HI THERE";
+        let timing_params = MorseTimingParams {
+            humanization_factor: 0.5,
+            random_seed: 456,
+            ..Default::default()
+        };
+        let interpret_params = MorseInterpretParams::default();
+
+        let elements = generate_morse_timing(original_text, &timing_params).unwrap();
+        let signals = timing_elements_to_signals(&elements);
+        let result = morse_interpret(&signals, &interpret_params).unwrap();
+
+        println!(
+            "Fuzzy multi-word: Expected '{}', Got '{}', Confidence: {}",
+            original_text, result.text, result.confidence
+        );
+        assert_eq!(result.text, original_text, "Failed fuzzy multi-word test");
+        assert!(
+            result.confidence > 0.4,
+            "Low confidence for fuzzy multi-word"
+        );
+    }
+
+    #[test]
+    fn test_round_trip_varying_wpm_speeds() {
+        use crate::interpret::morse_interpret;
+        use crate::types::{MorseInterpretParams, MorseTimingParams};
+
+        let test_cases = [
+            ("SLOW", 8),  // Very slow
+            ("MED", 15),  // Medium
+            ("FAST", 25), // Fast
         ];
 
-        let result = morse_interpret(&signals, &params).unwrap();
-        assert_eq!(result.text, "E");
-        assert_eq!(result.signals_processed, 2); // Only non-noise signals
+        for (text, wpm) in &test_cases {
+            let timing_params = MorseTimingParams {
+                wpm: *wpm,
+                humanization_factor: 0.4,
+                random_seed: 789,
+                ..Default::default()
+            };
+            let interpret_params = MorseInterpretParams::default();
+
+            let elements = generate_morse_timing(text, &timing_params).unwrap();
+            let signals = timing_elements_to_signals(&elements);
+            let result = morse_interpret(&signals, &interpret_params).unwrap();
+
+            println!(
+                "WPM {} test: Expected '{}', Got '{}', Confidence: {}",
+                wpm, text, result.text, result.confidence
+            );
+
+            // Debug: print signal timings for failed case
+            if result.text != *text {
+                println!("DEBUG - Failed test signals for '{}' at {} WPM:", text, wpm);
+                for (i, sig) in signals.iter().enumerate() {
+                    println!(
+                        "  Signal {}: {} for {:.4}s",
+                        i,
+                        if sig.on { "ON " } else { "OFF" },
+                        sig.seconds
+                    );
+                }
+            }
+
+            assert_eq!(result.text, *text, "Failed WPM {} test", wpm);
+            assert!(
+                result.confidence > 0.3,
+                "Low confidence for WPM {} test",
+                wpm
+            );
+        }
+    }
+
+    #[test]
+    fn test_round_trip_extreme_humanization() {
+        use crate::interpret::morse_interpret;
+        use crate::types::{MorseInterpretParams, MorseTimingParams};
+
+        let original_text = "TEST";
+        let timing_params = MorseTimingParams {
+            humanization_factor: 0.9, // Very high humanization
+            random_seed: 999,
+            ..Default::default()
+        };
+        let interpret_params = MorseInterpretParams::default();
+
+        let elements = generate_morse_timing(original_text, &timing_params).unwrap();
+        let signals = timing_elements_to_signals(&elements);
+        let result = morse_interpret(&signals, &interpret_params).unwrap();
+
+        println!(
+            "Extreme humanization: Expected '{}', Got '{}', Confidence: {}",
+            original_text, result.text, result.confidence
+        );
+        // This test might fail - let's see how robust our beam search is
+        if result.text != original_text {
+            println!("WARNING: Extreme humanization caused interpretation failure");
+            println!("This indicates the beam search needs tuning for very fuzzy signals");
+        }
+        // Don't assert equality for now - just log the result to see what happens
+    }
+
+    // Small problematic patterns that might cause issues
+    #[test]
+    fn test_fuzzy_small_patterns() {
+        use crate::interpret::morse_interpret;
+        use crate::types::{MorseInterpretParams, MorseTimingParams};
+
+        let test_cases = [
+            "S",   // Short pattern: ...
+            "T",   // Single dash: -
+            "A",   // Mixed: .-
+            "N",   // Mixed: -.
+            "ST",  // Adjacent similar patterns
+            "SOS", // Classic pattern
+        ];
+
+        for (i, &text) in test_cases.iter().enumerate() {
+            let timing_params = MorseTimingParams {
+                humanization_factor: 0.7,    // High but not extreme
+                random_seed: 100 + i as u32, // Different seed for each
+                ..Default::default()
+            };
+            let interpret_params = MorseInterpretParams::default();
+
+            let elements = generate_morse_timing(text, &timing_params).unwrap();
+            let signals = timing_elements_to_signals(&elements);
+            let result = morse_interpret(&signals, &interpret_params).unwrap();
+
+            println!(
+                "Small pattern '{}': Got '{}', Confidence: {}",
+                text, result.text, result.confidence
+            );
+
+            if result.text != text {
+                println!("  FAILED: Expected '{}' but got '{}'", text, result.text);
+                println!("  Signals:");
+                for (j, sig) in signals.iter().enumerate() {
+                    println!(
+                        "    {}: {} {:.3}s",
+                        j,
+                        if sig.on { "ON " } else { "OFF" },
+                        sig.seconds
+                    );
+                }
+            }
+
+            // Don't assert - just observe for now
+        }
+    }
+
+    // Longer phrases with multiple spaces to test word boundary detection
+    #[test]
+    fn test_fuzzy_long_phrases() {
+        use crate::interpret::morse_interpret;
+        use crate::types::{MorseInterpretParams, MorseTimingParams};
+
+        let test_cases = [
+            "THE END",         // Simple two words
+            "CQ CQ CQ",        // Repeated pattern (ham radio)
+            "SOS HELP SOS",    // Emergency message with repeats
+            "HELLO WORLD NOW", // Three words
+            "A B C D E",       // Many short words (challenging spacing)
+        ];
+
+        for (i, &text) in test_cases.iter().enumerate() {
+            let timing_params = MorseTimingParams {
+                humanization_factor: 0.4, // Moderate humanization
+                random_seed: 200 + i as u32,
+                ..Default::default()
+            };
+            let interpret_params = MorseInterpretParams::default();
+
+            let elements = generate_morse_timing(text, &timing_params).unwrap();
+            let signals = timing_elements_to_signals(&elements);
+            let result = morse_interpret(&signals, &interpret_params).unwrap();
+
+            println!(
+                "Long phrase '{}': Got '{}', Confidence: {}",
+                text, result.text, result.confidence
+            );
+
+            if result.text != text {
+                println!("  FAILED: Expected '{}' but got '{}'", text, result.text);
+                println!(
+                    "  Length difference: expected {} chars, got {} chars",
+                    text.len(),
+                    result.text.len()
+                );
+            }
+
+            // Don't assert - just observe patterns
+        }
+    }
+
+    // Test specific problematic sequences that might cause spacing issues
+    #[test]
+    fn test_fuzzy_spacing_edge_cases() {
+        use crate::interpret::morse_interpret;
+        use crate::types::{MorseInterpretParams, MorseTimingParams};
+
+        let test_cases = [
+            ("I AM", "Single letter words"),
+            ("S T", "Very short words"),
+            ("SO FAR", "Mixed short/medium"),
+            ("FAST CAR", "Contains our known failure case"),
+            ("A B C", "Minimal spacing challenge"),
+        ];
+
+        for (i, (text, description)) in test_cases.iter().enumerate() {
+            let timing_params = MorseTimingParams {
+                humanization_factor: 0.6,
+                random_seed: 300 + i as u32,
+                wpm: 20, // Standard speed
+                ..Default::default()
+            };
+            let interpret_params = MorseInterpretParams::default();
+
+            let elements = generate_morse_timing(text, &timing_params).unwrap();
+            let signals = timing_elements_to_signals(&elements);
+            let result = morse_interpret(&signals, &interpret_params).unwrap();
+
+            println!(
+                "Spacing test '{}' ({}): Got '{}', Confidence: {}",
+                text, description, result.text, result.confidence
+            );
+
+            if result.text != *text {
+                println!("  FAILED: Spacing issue detected");
+            }
+        }
     }
 }

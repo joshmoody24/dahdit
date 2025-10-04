@@ -1,6 +1,29 @@
 use crate::types::*;
 use std::f32::consts::PI;
 
+// === PHASE 3 CONSTANTS ===
+
+// Beam Search Parameters - tuned for robustness with fuzzy signals
+const DEFAULT_BEAM_SIZE: usize = 64;        // Increased from 32 to keep more hypotheses
+const DEFAULT_SPACE_PENALTY: f32 = 0.3;     // Reduced from 0.5 - be less reluctant to add spaces
+const DEFAULT_LM_WEIGHT: f32 = 2.0;         // Increased from 1.0 - trust language model more
+const DEFAULT_LATE_INTRA_PENALTY: f32 = 0.5; // Reduced from 0.7 - be more forgiving of timing
+const DEFAULT_LONG_INTER_PENALTY: f32 = 0.6; // Reduced from 0.8 - be more forgiving of timing
+
+// Language Model Parameters
+const DEFAULT_UNKNOWN_TRIGRAM_COST: f32 = 8.0;
+
+// Timing Thresholds (multipliers of unit time T)
+const LATE_INTRA_THRESHOLD_MULTIPLIER: f32 = 2.0;
+const LONG_INTER_THRESHOLD_MULTIPLIER: f32 = 4.0;
+const LONG_WORD_LENGTH_THRESHOLD: u16 = 3;
+
+// Probabilistic Timing Model Parameters - tuned for robustness with fuzzy signals
+const DEFAULT_TIMING_SIGMA: f32 = 0.5;      // Increased from 0.35 - less confident timing
+const DEFAULT_TIMING_TRACKER_ALPHA: f32 = 0.1;
+
+// Confidence Calculation Parameters
+
 /// Timing statistics for adaptive analysis
 #[derive(Debug, Clone)]
 struct TimingStats {
@@ -49,7 +72,7 @@ impl TimingTracker {
     fn new(initial_t: f32) -> Self {
         Self {
             ln_t: initial_t.max(1e-6).ln(),
-            alpha: 0.1, // Conservative smoothing
+            alpha: DEFAULT_TIMING_TRACKER_ALPHA,
         }
     }
 
@@ -76,6 +99,11 @@ impl TimingTracker {
     fn get_ln_t(&self) -> f32 {
         self.ln_t
     }
+
+    /// Get the current unit time estimate
+    fn get_t(&self) -> f32 {
+        self.ln_t.exp()
+    }
 }
 
 /// Probabilistic timing model using log-normal distributions
@@ -89,7 +117,7 @@ impl ProbabilisticTimingModel {
     fn from_tracker(tracker: &TimingTracker) -> Self {
         Self {
             ln_t: tracker.get_ln_t(),
-            sigma: 0.35, // Reasonable default for human timing variation
+            sigma: DEFAULT_TIMING_SIGMA,
         }
     }
 
@@ -300,6 +328,483 @@ fn get_morse_trie() -> &'static MorseTrie {
     TRIE.get_or_init(MorseTrie::build)
 }
 
+// === PHASE 3: BEAM SEARCH + LANGUAGE MODEL ===
+
+/// Beam search hypothesis for multiple interpretation paths
+#[derive(Debug, Clone)]
+struct Hypothesis {
+    /// Current position in morse trie (0 = root)
+    trie_node: u16,
+
+    /// Last 2 characters for trigram language model context
+    lm_context: [u8; 2],
+
+    /// Number of characters in current word (since last space)
+    pending_word_len: u16,
+
+    /// Accumulated cost: timing + language + spacing penalties
+    cost: f32,
+
+    /// Decoded text output so far
+    text: String,
+}
+
+impl Hypothesis {
+    /// Create initial hypothesis at start of decoding
+    fn new() -> Self {
+        Self {
+            trie_node: MorseTrie::ROOT,
+            lm_context: [b' ', b' '], // Start with spaces for context
+            pending_word_len: 0,
+            cost: 0.0,
+            text: String::new(),
+        }
+    }
+
+    /// Add a character to the hypothesis and update language model context
+    fn add_character(&mut self, ch: char, lm_cost: f32) {
+        self.text.push(ch);
+        self.cost += lm_cost;
+
+        // Update trigram context (shift left, add new char)
+        self.lm_context[0] = self.lm_context[1];
+        self.lm_context[1] = if ch.is_ascii() { ch as u8 } else { b'?' };
+
+        if ch == ' ' {
+            self.pending_word_len = 0;
+        } else {
+            self.pending_word_len += 1;
+        }
+
+        // Reset trie position after completing a character
+        self.trie_node = MorseTrie::ROOT;
+    }
+
+    /// Clone hypothesis for beam search expansion
+    fn fork(&self) -> Self {
+        self.clone()
+    }
+}
+
+/// Simple character trigram language model with embedded English data
+struct LanguageModel {
+    /// Trigram costs: (char1, char2, char3) -> negative log probability
+    trigrams: std::collections::HashMap<(u8, u8, u8), f32>,
+
+    /// Default cost for unknown trigrams
+    default_cost: f32,
+}
+
+impl LanguageModel {
+    /// Create English language model with common trigrams
+    /// Based on frequency analysis of English text
+    fn new() -> Self {
+        let mut lm = Self {
+            trigrams: std::collections::HashMap::new(),
+            default_cost: DEFAULT_UNKNOWN_TRIGRAM_COST,
+        };
+
+        // Load common English trigrams with frequency-based costs
+        // Format: trigram, frequency_rank -> lower rank = lower cost
+        lm.load_english_trigrams();
+
+        // Add morse-specific patterns not in general English text
+        lm.add_trigram_cost(b"SOS", 0.5); // Very common morse pattern
+        lm.add_trigram_cost(b"CQC", 0.8); // Ham radio
+        lm.add_trigram_cost(b"CQ ", 0.3); // CQ call
+        lm.add_trigram_cost(b"QSO", 1.0); // Ham radio conversation
+
+        lm
+    }
+
+    /// Load common English trigrams from build-time generated data
+    fn load_english_trigrams(&mut self) {
+        // Include the generated trigram data
+        let trigram_data: &[(&str, f32)] = include!(concat!(env!("OUT_DIR"), "/trigrams.rs"));
+
+        for &(trigram_str, cost) in trigram_data {
+            let bytes = trigram_str.as_bytes();
+            if bytes.len() == 3 {
+                self.trigrams.insert((bytes[0], bytes[1], bytes[2]), cost);
+            }
+        }
+    }
+
+    /// Add a specific trigram with cost
+    fn add_trigram_cost(&mut self, trigram: &[u8; 3], cost: f32) {
+        self.trigrams
+            .insert((trigram[0], trigram[1], trigram[2]), cost);
+    }
+
+    /// Get language model cost for completing a trigram
+    fn get_cost(&self, context: [u8; 2], next_char: u8) -> f32 {
+        self.trigrams
+            .get(&(context[0], context[1], next_char))
+            .copied()
+            .unwrap_or(self.default_cost)
+    }
+}
+
+/// Get the global language model (built on first call)
+fn get_language_model() -> &'static LanguageModel {
+    use std::sync::OnceLock;
+    static LM: OnceLock<LanguageModel> = OnceLock::new();
+    LM.get_or_init(LanguageModel::new)
+}
+
+/// Beam search parameters for Phase 3
+#[derive(Debug, Clone)]
+struct BeamSearchParams {
+    /// Maximum number of hypotheses to maintain
+    beam_size: usize,
+
+    /// Cost penalty for inserting spaces
+    space_penalty: f32,
+
+    /// Weight of language model relative to timing costs
+    lm_weight: f32,
+
+    /// Penalty for late intra-character gaps (should be dots/dashes)
+    late_intra_penalty: f32,
+
+    /// Penalty for long inter-character gaps without inserting space
+    long_inter_penalty: f32,
+}
+
+impl Default for BeamSearchParams {
+    fn default() -> Self {
+        Self {
+            beam_size: DEFAULT_BEAM_SIZE,
+            space_penalty: DEFAULT_SPACE_PENALTY,
+            lm_weight: DEFAULT_LM_WEIGHT,
+            late_intra_penalty: DEFAULT_LATE_INTRA_PENALTY,
+            long_inter_penalty: DEFAULT_LONG_INTER_PENALTY,
+        }
+    }
+}
+
+/// Beam search decoder for morse signals using trie + language model
+struct BeamSearchDecoder {
+    /// Current hypotheses being tracked
+    hypotheses: Vec<Hypothesis>,
+
+    /// Search parameters
+    params: BeamSearchParams,
+
+    /// Access to morse trie
+    trie: &'static MorseTrie,
+
+    /// Access to language model
+    lm: &'static LanguageModel,
+
+    /// Timing tracker for online adaptation
+    timing_tracker: TimingTracker,
+
+    /// Probabilistic timing model for gap classification
+    timing_model: ProbabilisticTimingModel,
+}
+
+impl BeamSearchDecoder {
+    /// Create new beam search decoder
+    fn new(initial_timing: f32, params: BeamSearchParams) -> Self {
+        let timing_tracker = TimingTracker::new(initial_timing);
+        let timing_model = ProbabilisticTimingModel::from_tracker(&timing_tracker);
+
+        let mut decoder = Self {
+            hypotheses: vec![Hypothesis::new()],
+            params,
+            trie: get_morse_trie(),
+            lm: get_language_model(),
+            timing_tracker,
+            timing_model,
+        };
+
+        // Ensure we start with exactly one hypothesis
+        decoder.hypotheses.truncate(1);
+        decoder
+    }
+
+    /// Process an ON signal (dot or dash) - expand hypotheses in trie
+    fn process_on_signal(&mut self, signal: &MorseSignal) {
+        let element = self.timing_model.classify_element_min_cost(signal.seconds);
+        let mut new_hypotheses = Vec::new();
+
+        for hyp in &self.hypotheses {
+            // Try to advance in trie with this element
+            if let Some(next_node) = self.trie.transition(hyp.trie_node, element) {
+                let mut new_hyp = hyp.fork();
+                new_hyp.trie_node = next_node;
+                // Get the cost for this specific element classification
+                let element_costs = self.timing_model.element_costs(signal.seconds);
+                for (elem_type, cost) in element_costs {
+                    if elem_type == element {
+                        new_hyp.cost += cost;
+                        break;
+                    }
+                }
+                new_hypotheses.push(new_hyp);
+            }
+            // Note: If trie transition fails, hypothesis is dropped (invalid pattern)
+        }
+
+        self.hypotheses = new_hypotheses;
+        self.prune_beam();
+    }
+
+    /// Process an OFF signal (gap) - handle character/word completion and spacing
+    fn process_off_signal(&mut self, signal: &MorseSignal) {
+        let gap_type = self.timing_model.classify_gap_min_cost(signal.seconds);
+        let mut new_hypotheses = Vec::new();
+
+        for hyp in &self.hypotheses {
+            match gap_type {
+                GapType::IntraCharacter => {
+                    // Short gap - stay in current character
+                    let mut new_hyp = hyp.fork();
+                    // Get the cost for this specific gap classification
+                    let gap_costs = self.timing_model.gap_costs(signal.seconds);
+                    for (gap_type_cost, cost) in gap_costs {
+                        if gap_type_cost == gap_type {
+                            new_hyp.cost += cost;
+                            break;
+                        }
+                    }
+
+                    // Add penalty if this looks like it should be longer
+                    if signal.seconds
+                        > self.timing_tracker.get_t() * LATE_INTRA_THRESHOLD_MULTIPLIER
+                    {
+                        new_hyp.cost += self.params.late_intra_penalty;
+                    }
+
+                    new_hypotheses.push(new_hyp);
+                }
+                GapType::InterCharacter => {
+                    // Medium gap - complete character, don't add space
+                    if let Some(ch) = self.trie.get_terminal(hyp.trie_node) {
+                        let mut new_hyp = hyp.fork();
+                        let lm_cost =
+                            self.lm.get_cost(new_hyp.lm_context, ch as u8) * self.params.lm_weight;
+                        new_hyp.add_character(ch, lm_cost);
+                        // Get the cost for inter-character gap classification
+                        let gap_costs = self.timing_model.gap_costs(signal.seconds);
+                        for (gap_type_cost, cost) in gap_costs {
+                            if gap_type_cost == gap_type {
+                                new_hyp.cost += cost;
+                                break;
+                            }
+                        }
+                        new_hypotheses.push(new_hyp);
+                    }
+
+                    // Also consider adding space if word is getting long
+                    if hyp.pending_word_len > LONG_WORD_LENGTH_THRESHOLD {
+                        if let Some(ch) = self.trie.get_terminal(hyp.trie_node) {
+                            let mut space_hyp = hyp.fork();
+                            let ch_cost = self.lm.get_cost(space_hyp.lm_context, ch as u8)
+                                * self.params.lm_weight;
+                            space_hyp.add_character(ch, ch_cost);
+
+                            let space_cost = self.lm.get_cost(space_hyp.lm_context, b' ')
+                                * self.params.lm_weight;
+                            space_hyp.add_character(' ', space_cost + self.params.space_penalty);
+                            // Get the cost for gap classification with space
+                            let gap_costs = self.timing_model.gap_costs(signal.seconds);
+                            for (gap_type_cost, cost) in gap_costs {
+                                if gap_type_cost == gap_type {
+                                    space_hyp.cost += cost;
+                                    break;
+                                }
+                            }
+                            new_hypotheses.push(space_hyp);
+                        }
+                    }
+                }
+                GapType::Word => {
+                    // Long gap - complete character and add space
+                    if let Some(ch) = self.trie.get_terminal(hyp.trie_node) {
+                        let mut new_hyp = hyp.fork();
+                        let ch_cost =
+                            self.lm.get_cost(new_hyp.lm_context, ch as u8) * self.params.lm_weight;
+                        new_hyp.add_character(ch, ch_cost);
+
+                        let space_cost =
+                            self.lm.get_cost(new_hyp.lm_context, b' ') * self.params.lm_weight;
+                        new_hyp.add_character(' ', space_cost);
+                        // Get the cost for word gap classification
+                        let gap_costs = self.timing_model.gap_costs(signal.seconds);
+                        for (gap_type_cost, cost) in gap_costs {
+                            if gap_type_cost == gap_type {
+                                new_hyp.cost += cost;
+                                break;
+                            }
+                        }
+                        new_hypotheses.push(new_hyp);
+                    }
+                }
+            }
+
+            // For inter-character and word gaps, also try continuing without completing
+            // (in case timing classification was wrong)
+            if matches!(gap_type, GapType::InterCharacter) {
+                let mut continue_hyp = hyp.fork();
+                // Get the cost for treating this as intra-character gap
+                let gap_costs = self.timing_model.gap_costs(signal.seconds);
+                for (gap_type_cost, cost) in gap_costs {
+                    if gap_type_cost == GapType::IntraCharacter {
+                        continue_hyp.cost += cost;
+                        break;
+                    }
+                }
+
+                // Add penalty for long gaps without character completion
+                if signal.seconds > self.timing_tracker.get_t() * LONG_INTER_THRESHOLD_MULTIPLIER {
+                    continue_hyp.cost += self.params.long_inter_penalty;
+                }
+
+                new_hypotheses.push(continue_hyp);
+            }
+        }
+
+        self.hypotheses = new_hypotheses;
+        self.prune_beam();
+    }
+
+    /// Prune hypotheses to beam size, keeping lowest cost ones
+    fn prune_beam(&mut self) {
+        if self.hypotheses.len() <= self.params.beam_size {
+            return;
+        }
+
+        // Sort by cost (ascending - lower is better)
+        self.hypotheses.sort_by(|a, b| {
+            a.cost
+                .partial_cmp(&b.cost)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+
+        // Keep only the best beam_size hypotheses
+        self.hypotheses.truncate(self.params.beam_size);
+    }
+
+    /// Complete decoding and return best hypothesis
+    fn finalize(&mut self) -> Hypothesis {
+        // Complete any remaining characters
+        for hyp in &mut self.hypotheses {
+            if let Some(ch) = self.trie.get_terminal(hyp.trie_node) {
+                let lm_cost = self.lm.get_cost(hyp.lm_context, ch as u8) * self.params.lm_weight;
+                hyp.add_character(ch, lm_cost);
+            }
+        }
+
+        // Find hypothesis with lowest total cost
+        std::mem::take(&mut self.hypotheses)
+            .into_iter()
+            .min_by(|a, b| {
+                a.cost
+                    .partial_cmp(&b.cost)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
+            .unwrap_or_else(Hypothesis::new)
+    }
+
+    /// Update timing model with new signal (for online adaptation)
+    fn update_timing(&mut self, signal: &MorseSignal) {
+        if signal.on {
+            self.timing_tracker.update_from_on_signal(signal.seconds);
+            // Update probabilistic timing model with new tracker state
+            self.timing_model = ProbabilisticTimingModel::from_tracker(&self.timing_tracker);
+        }
+    }
+}
+
+/// Parse morse signals using beam search + language model (Phase 3)
+fn parse_morse_signals_beam_search(
+    signals: &[MorseSignal],
+    timings: &MorseTimings,
+    max_output_length: usize,
+) -> MorseInterpretResult {
+    let mut result = MorseInterpretResult {
+        text: String::new(),
+        confidence: 0.0,
+        signals_processed: 0,
+        patterns_recognized: 0,
+    };
+
+    if signals.is_empty() {
+        return result;
+    }
+
+    // Initialize beam search with default parameters
+    let params = BeamSearchParams::default();
+    let mut decoder = BeamSearchDecoder::new(timings.dot_duration, params);
+
+    let _recognized_patterns = 0;
+    let _total_patterns = 0;
+
+    // Process each signal through beam search
+    for signal in signals {
+        // Update timing model for adaptation
+        decoder.update_timing(signal);
+
+        // Process signal based on type
+        match signal.on {
+            true => {
+                // ON signal - advance trie hypotheses
+                decoder.process_on_signal(signal);
+            }
+            false => {
+                // OFF signal - handle character/word completion
+                decoder.process_off_signal(signal);
+            }
+        }
+
+        // Safety check for output length
+        if decoder
+            .hypotheses
+            .iter()
+            .any(|h| h.text.len() >= max_output_length)
+        {
+            break;
+        }
+
+        result.signals_processed += 1;
+    }
+
+    // Finalize decoding and get best hypothesis
+    let best_hypothesis = decoder.finalize();
+
+    result.text = best_hypothesis.text;
+
+    // Estimate confidence based on final cost and text length
+    // Lower costs indicate higher confidence, but costs can be negative due to LM bonuses
+    if !result.text.is_empty() {
+        let avg_cost_per_char = best_hypothesis.cost / result.text.len() as f32;
+
+        // Simple linear mapping based on observed cost ranges:
+        // Negative costs (good English): confidence > 0.9
+        // Cost 0-3: confidence 0.85-0.95
+        // Cost 3-8: confidence 0.7-0.85
+        // Cost > 8: confidence < 0.7
+        result.confidence = if avg_cost_per_char < 0.0 {
+            0.95 + (-avg_cost_per_char * 0.005).min(0.05) // Very high confidence for bonuses
+        } else if avg_cost_per_char <= 3.0 {
+            0.95 - avg_cost_per_char * 0.033 // 0.95 to 0.85
+        } else if avg_cost_per_char <= 8.0 {
+            0.85 - (avg_cost_per_char - 3.0) * 0.02 // 0.85 to 0.75
+        } else {
+            0.7 - (avg_cost_per_char - 8.0) * 0.01 // Decrease slowly below 0.7
+        }
+        .max(0.0);
+    }
+
+    // For beam search, we don't track individual patterns the same way
+    // Instead, use text length as a proxy for recognized patterns
+    result.patterns_recognized = result.text.chars().filter(|&c| c != ' ').count() as i32;
+
+    result
+}
+
 /// Detected timing thresholds for morse interpretation
 /// Only dot_duration is used as initial estimate for TimingTracker
 #[derive(Debug, Clone)]
@@ -435,198 +940,6 @@ enum GapType {
     Word,           // Inter-word gap
 }
 
-/// State machine for parsing morse signals using trie navigation
-#[derive(Debug)]
-enum ParseState {
-    Idle,
-    InCharacter {
-        trie_node: u16,                  // Current position in morse trie
-        elements: Vec<MorseElementType>, // Keep for compatibility/debugging
-    },
-    BetweenCharacters,
-}
-
-/// Parse morse signals into text using state machine with probabilistic timing
-fn parse_morse_signals(
-    signals: &[MorseSignal],
-    timings: &MorseTimings,
-    max_output_length: usize,
-) -> MorseInterpretResult {
-    let mut result = MorseInterpretResult {
-        text: String::new(),
-        confidence: 0.0,
-        signals_processed: 0,
-        patterns_recognized: 0,
-    };
-
-    let mut state = ParseState::Idle;
-    let mut total_patterns = 0;
-    let mut recognized_patterns = 0;
-
-    const NOISE_THRESHOLD: f32 = 0.01;
-
-    // Initialize adaptive timing tracker with initial estimate from timings
-    let initial_t = timings.dot_duration;
-    let mut timing_tracker = TimingTracker::new(initial_t);
-
-    // Create probabilistic timing model (will be updated as we process signals)
-    let mut prob_model = ProbabilisticTimingModel::from_tracker(&timing_tracker);
-
-    for signal in signals {
-        if signal.seconds < NOISE_THRESHOLD {
-            continue;
-        }
-
-        result.signals_processed += 1;
-
-        match signal.on {
-            true => {
-                // Update adaptive timing tracker with ON signal
-                timing_tracker.update_from_on_signal(signal.seconds);
-
-                // Update probabilistic model with latest timing estimate
-                prob_model = ProbabilisticTimingModel::from_tracker(&timing_tracker);
-
-                // ON signal - add element to current character using trie navigation
-                let element = prob_model.classify_element_min_cost(signal.seconds);
-                let trie = get_morse_trie();
-
-                match state {
-                    ParseState::Idle | ParseState::BetweenCharacters => {
-                        // Start new character - try to transition from root
-                        if let Some(next_node) = trie.transition(MorseTrie::ROOT, element) {
-                            state = ParseState::InCharacter {
-                                trie_node: next_node,
-                                elements: vec![element],
-                            };
-                        } else {
-                            // Invalid pattern from root - ignore this signal
-                            continue;
-                        }
-                    }
-                    ParseState::InCharacter {
-                        ref mut trie_node,
-                        ref mut elements,
-                    } => {
-                        // Try to advance in the trie
-                        if let Some(next_node) = trie.transition(*trie_node, element) {
-                            *trie_node = next_node;
-                            elements.push(element);
-                        } else {
-                            // Dead end in trie - complete current character if possible
-                            if let Some(ch) = trie.get_terminal(*trie_node) {
-                                result.text.push(ch);
-                                recognized_patterns += 1;
-                            }
-                            total_patterns += 1;
-
-                            // Start new character with current element
-                            if let Some(new_node) = trie.transition(MorseTrie::ROOT, element) {
-                                state = ParseState::InCharacter {
-                                    trie_node: new_node,
-                                    elements: vec![element],
-                                };
-                            } else {
-                                state = ParseState::Idle;
-                            }
-                        }
-
-                        // Safety check for very long patterns
-                        if let ParseState::InCharacter {
-                            elements,
-                            trie_node,
-                        } = &state
-                        {
-                            if elements.len() > 7 {
-                                // Force completion
-                                if let Some(ch) = trie.get_terminal(*trie_node) {
-                                    result.text.push(ch);
-                                    recognized_patterns += 1;
-                                }
-                                total_patterns += 1;
-                                state = ParseState::Idle;
-                            }
-                        }
-                    }
-                }
-            }
-            false => {
-                // OFF signal - determine gap type using probabilistic classification
-                let gap_type = prob_model.classify_gap_min_cost(signal.seconds);
-                // Handle state transitions without borrowing conflicts
-                let trie = get_morse_trie();
-                let new_state = match &state {
-                    ParseState::InCharacter {
-                        trie_node,
-                        elements: _,
-                    } => {
-                        match gap_type {
-                            GapType::IntraCharacter => {
-                                // Stay in character, continue building pattern
-                                None // No state change
-                            }
-                            GapType::InterCharacter => {
-                                // End of character - use trie to get character
-                                if let Some(ch) = trie.get_terminal(*trie_node) {
-                                    result.text.push(ch);
-                                    recognized_patterns += 1;
-                                }
-                                total_patterns += 1;
-                                Some(ParseState::BetweenCharacters)
-                            }
-                            GapType::Word => {
-                                // End of character and word - use trie to get character
-                                if let Some(ch) = trie.get_terminal(*trie_node) {
-                                    result.text.push(ch);
-                                    recognized_patterns += 1;
-                                }
-                                total_patterns += 1;
-                                result.text.push(' ');
-                                Some(ParseState::Idle)
-                            }
-                        }
-                    }
-                    _ => None, // Other states don't change on OFF signals
-                };
-
-                if let Some(new_state) = new_state {
-                    state = new_state;
-                }
-            }
-        }
-
-        // Safety check for output length
-        if result.text.len() >= max_output_length {
-            break;
-        }
-    }
-
-    // Handle any remaining pattern in final state
-    if let ParseState::InCharacter {
-        trie_node,
-        elements: _,
-    } = state
-    {
-        let trie = get_morse_trie();
-        if let Some(ch) = trie.get_terminal(trie_node) {
-            result.text.push(ch);
-            recognized_patterns += 1;
-        }
-        total_patterns += 1;
-    }
-
-    result.patterns_recognized = recognized_patterns;
-
-    // Calculate confidence based on recognition rate
-    result.confidence = if total_patterns > 0 {
-        (recognized_patterns as f32 / total_patterns as f32).min(1.0)
-    } else {
-        0.0
-    };
-
-    result
-}
-
 /// Main morse interpretation function
 pub fn morse_interpret(
     signals: &[MorseSignal],
@@ -644,8 +957,9 @@ pub fn morse_interpret(
     // Analyze signal timings
     let timings = MorseTimings::from_signals(signals)?;
 
-    // Parse signals into text
-    let result = parse_morse_signals(signals, &timings, params.max_output_length as usize);
+    // Parse signals into text using Phase 3 beam search + language model
+    let result =
+        parse_morse_signals_beam_search(signals, &timings, params.max_output_length as usize);
 
     Ok(result)
 }
