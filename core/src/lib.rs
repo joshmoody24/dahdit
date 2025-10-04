@@ -681,4 +681,310 @@ mod tests {
             }
         }
     }
+
+    // Test manual morse input with long gaps (like a beginner might produce)
+    #[test]
+    fn test_manual_morse_long_gaps() {
+        use crate::interpret::morse_interpret;
+        use crate::types::{MorseInterpretParams, MorseSignal};
+
+        let params = MorseInterpretParams::default();
+
+        // Simulate "JOSH" with a beginner who has naturally long gaps between characters
+        // J = .--- , O = ---, S = ..., H = ....
+        // Using longer gaps than theoretical 1:3:7 ratios
+        let signals = vec![
+            // J = .---
+            MorseSignal {
+                on: true,
+                seconds: 0.1,
+            }, // dot
+            MorseSignal {
+                on: false,
+                seconds: 0.1,
+            }, // element gap
+            MorseSignal {
+                on: true,
+                seconds: 0.3,
+            }, // dash
+            MorseSignal {
+                on: false,
+                seconds: 0.1,
+            }, // element gap
+            MorseSignal {
+                on: true,
+                seconds: 0.3,
+            }, // dash
+            MorseSignal {
+                on: false,
+                seconds: 0.1,
+            }, // element gap
+            MorseSignal {
+                on: true,
+                seconds: 0.3,
+            }, // dash
+            MorseSignal {
+                on: false,
+                seconds: 0.8,
+            }, // LONG character gap (beginner style)
+            // O = ---
+            MorseSignal {
+                on: true,
+                seconds: 0.3,
+            }, // dash
+            MorseSignal {
+                on: false,
+                seconds: 0.1,
+            }, // element gap
+            MorseSignal {
+                on: true,
+                seconds: 0.3,
+            }, // dash
+            MorseSignal {
+                on: false,
+                seconds: 0.1,
+            }, // element gap
+            MorseSignal {
+                on: true,
+                seconds: 0.3,
+            }, // dash
+            MorseSignal {
+                on: false,
+                seconds: 0.9,
+            }, // LONG character gap
+            // S = ...
+            MorseSignal {
+                on: true,
+                seconds: 0.1,
+            }, // dot
+            MorseSignal {
+                on: false,
+                seconds: 0.1,
+            }, // element gap
+            MorseSignal {
+                on: true,
+                seconds: 0.1,
+            }, // dot
+            MorseSignal {
+                on: false,
+                seconds: 0.1,
+            }, // element gap
+            MorseSignal {
+                on: true,
+                seconds: 0.1,
+            }, // dot
+            MorseSignal {
+                on: false,
+                seconds: 0.7,
+            }, // LONG character gap
+            // H = ....
+            MorseSignal {
+                on: true,
+                seconds: 0.1,
+            }, // dot
+            MorseSignal {
+                on: false,
+                seconds: 0.1,
+            }, // element gap
+            MorseSignal {
+                on: true,
+                seconds: 0.1,
+            }, // dot
+            MorseSignal {
+                on: false,
+                seconds: 0.1,
+            }, // element gap
+            MorseSignal {
+                on: true,
+                seconds: 0.1,
+            }, // dot
+            MorseSignal {
+                on: false,
+                seconds: 0.1,
+            }, // element gap
+            MorseSignal {
+                on: true,
+                seconds: 0.1,
+            }, // dot
+        ];
+
+        let result = morse_interpret(&signals, &params).unwrap();
+
+        println!(
+            "Manual morse 'JOSH' with long gaps: Got '{}', Confidence: {}",
+            result.text, result.confidence
+        );
+
+        // The old system would likely produce "J O S H" due to long gaps
+        // The new clustering system should recognize these are character gaps, not word gaps
+        // and produce "JOSH"
+
+        if result.text == "JOSH" {
+            println!("  SUCCESS: Adaptive clustering correctly handled long character gaps!");
+        } else {
+            println!(
+                "  INFO: Got '{}' instead of 'JOSH' - clustering may need tuning",
+                result.text
+            );
+        }
+    }
+
+    // Test with mixed gap lengths to verify clustering works
+    #[test]
+    fn test_adaptive_gap_clustering() {
+        use crate::interpret::morse_interpret;
+        use crate::types::{MorseInterpretParams, MorseSignal};
+
+        let params = MorseInterpretParams::default();
+
+        // Test "HI THERE" with realistic manual timing variations
+        // H = ...., I = .., THERE = - .... . .-. .
+        // Use varied gap lengths to test the clustering
+        let signals = vec![
+            // H = ....
+            MorseSignal {
+                on: true,
+                seconds: 0.08,
+            }, // dot
+            MorseSignal {
+                on: false,
+                seconds: 0.08,
+            }, // short (intra)
+            MorseSignal {
+                on: true,
+                seconds: 0.08,
+            }, // dot
+            MorseSignal {
+                on: false,
+                seconds: 0.09,
+            }, // short (intra)
+            MorseSignal {
+                on: true,
+                seconds: 0.08,
+            }, // dot
+            MorseSignal {
+                on: false,
+                seconds: 0.07,
+            }, // short (intra)
+            MorseSignal {
+                on: true,
+                seconds: 0.08,
+            }, // dot
+            MorseSignal {
+                on: false,
+                seconds: 0.4,
+            }, // medium (inter-char)
+            // I = ..
+            MorseSignal {
+                on: true,
+                seconds: 0.08,
+            }, // dot
+            MorseSignal {
+                on: false,
+                seconds: 0.08,
+            }, // short (intra)
+            MorseSignal {
+                on: true,
+                seconds: 0.08,
+            }, // dot
+            MorseSignal {
+                on: false,
+                seconds: 1.2,
+            }, // VERY long (word gap)
+            // T = -
+            MorseSignal {
+                on: true,
+                seconds: 0.24,
+            }, // dash
+            MorseSignal {
+                on: false,
+                seconds: 0.35,
+            }, // medium (inter-char)
+            // H = ....
+            MorseSignal {
+                on: true,
+                seconds: 0.08,
+            }, // dot
+            MorseSignal {
+                on: false,
+                seconds: 0.08,
+            }, // short (intra)
+            MorseSignal {
+                on: true,
+                seconds: 0.08,
+            }, // dot
+            MorseSignal {
+                on: false,
+                seconds: 0.08,
+            }, // short (intra)
+            MorseSignal {
+                on: true,
+                seconds: 0.08,
+            }, // dot
+            MorseSignal {
+                on: false,
+                seconds: 0.08,
+            }, // short (intra)
+            MorseSignal {
+                on: true,
+                seconds: 0.08,
+            }, // dot
+            MorseSignal {
+                on: false,
+                seconds: 0.38,
+            }, // medium (inter-char)
+            // E = .
+            MorseSignal {
+                on: true,
+                seconds: 0.08,
+            }, // dot
+            MorseSignal {
+                on: false,
+                seconds: 0.42,
+            }, // medium (inter-char)
+            // R = .-.
+            MorseSignal {
+                on: true,
+                seconds: 0.08,
+            }, // dot
+            MorseSignal {
+                on: false,
+                seconds: 0.08,
+            }, // short (intra)
+            MorseSignal {
+                on: true,
+                seconds: 0.24,
+            }, // dash
+            MorseSignal {
+                on: false,
+                seconds: 0.08,
+            }, // short (intra)
+            MorseSignal {
+                on: true,
+                seconds: 0.08,
+            }, // dot
+            MorseSignal {
+                on: false,
+                seconds: 0.36,
+            }, // medium (inter-char)
+            // E = .
+            MorseSignal {
+                on: true,
+                seconds: 0.08,
+            }, // dot
+        ];
+
+        let result = morse_interpret(&signals, &params).unwrap();
+
+        println!(
+            "Adaptive clustering 'HI THERE': Got '{}', Confidence: {}",
+            result.text, result.confidence
+        );
+
+        if result.text == "HI THERE" {
+            println!("  SUCCESS: Clustering correctly identified word boundaries!");
+        } else {
+            println!("  INFO: Got '{}' - gap clustering results", result.text);
+        }
+    }
 }

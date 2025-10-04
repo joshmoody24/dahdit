@@ -4,9 +4,9 @@ use std::f32::consts::PI;
 // === PHASE 3 CONSTANTS ===
 
 // Beam Search Parameters - tuned for robustness with fuzzy signals
-const DEFAULT_BEAM_SIZE: usize = 64;        // Increased from 32 to keep more hypotheses
-const DEFAULT_SPACE_PENALTY: f32 = 0.3;     // Reduced from 0.5 - be less reluctant to add spaces
-const DEFAULT_LM_WEIGHT: f32 = 2.0;         // Increased from 1.0 - trust language model more
+const DEFAULT_BEAM_SIZE: usize = 64; // Increased from 32 to keep more hypotheses
+const DEFAULT_SPACE_PENALTY: f32 = 0.3; // Reduced from 0.5 - be less reluctant to add spaces
+const DEFAULT_LM_WEIGHT: f32 = 2.0; // Increased from 1.0 - trust language model more
 const DEFAULT_LATE_INTRA_PENALTY: f32 = 0.5; // Reduced from 0.7 - be more forgiving of timing
 const DEFAULT_LONG_INTER_PENALTY: f32 = 0.6; // Reduced from 0.8 - be more forgiving of timing
 
@@ -19,7 +19,7 @@ const LONG_INTER_THRESHOLD_MULTIPLIER: f32 = 4.0;
 const LONG_WORD_LENGTH_THRESHOLD: u16 = 3;
 
 // Probabilistic Timing Model Parameters - tuned for robustness with fuzzy signals
-const DEFAULT_TIMING_SIGMA: f32 = 0.5;      // Increased from 0.35 - less confident timing
+const DEFAULT_TIMING_SIGMA: f32 = 0.5; // Increased from 0.35 - less confident timing
 const DEFAULT_TIMING_TRACKER_ALPHA: f32 = 0.1;
 
 // Confidence Calculation Parameters
@@ -106,18 +106,21 @@ impl TimingTracker {
     }
 }
 
-/// Probabilistic timing model using log-normal distributions
+/// Probabilistic timing model using log-normal distributions with adaptive clustering
 #[derive(Debug, Clone)]
 struct ProbabilisticTimingModel {
     ln_t: f32,  // Log of unit time
     sigma: f32, // Log-space standard deviation
+    /// Adaptive gap classification thresholds (learned from signal clustering)
+    gap_clusters: GapClusters,
 }
 
 impl ProbabilisticTimingModel {
-    fn from_tracker(tracker: &TimingTracker) -> Self {
+    fn from_tracker_and_clusters(tracker: &TimingTracker, gap_clusters: GapClusters) -> Self {
         Self {
             ln_t: tracker.get_ln_t(),
             sigma: DEFAULT_TIMING_SIGMA,
+            gap_clusters,
         }
     }
 
@@ -138,25 +141,49 @@ impl ProbabilisticTimingModel {
         ]
     }
 
-    /// Get costs for classifying OFF signals (negative log-likelihood)
+    /// Get costs for classifying OFF signals using adaptive clustering thresholds
     fn gap_costs(&self, duration: f32) -> [(GapType, f32); 3] {
-        let ln_1t = self.ln_t;
-        let ln_3t = self.ln_t + 3.0f32.ln();
-        let ln_7t = self.ln_t + 7.0f32.ln();
+        // Use distance from cluster boundaries as costs
+        // Closer to the "natural" boundary = lower cost
+
+        let intra_cost = if duration <= self.gap_clusters.intra_to_inter_threshold {
+            // Short gap - low cost for intra-character
+            (duration - self.gap_clusters.intra_to_inter_threshold / 2.0).abs() * 0.1
+        } else {
+            // Not a short gap - higher cost for intra-character
+            (duration - self.gap_clusters.intra_to_inter_threshold).abs() * 0.5
+        };
+
+        let inter_cost = if duration > self.gap_clusters.intra_to_inter_threshold
+            && duration <= self.gap_clusters.inter_to_word_threshold
+        {
+            // Medium gap - low cost for inter-character
+            let mid_point = (self.gap_clusters.intra_to_inter_threshold
+                + self.gap_clusters.inter_to_word_threshold)
+                / 2.0;
+            (duration - mid_point).abs() * 0.1
+        } else {
+            // Not a medium gap - higher cost for inter-character
+            let distance_from_range = if duration <= self.gap_clusters.intra_to_inter_threshold {
+                self.gap_clusters.intra_to_inter_threshold - duration
+            } else {
+                duration - self.gap_clusters.inter_to_word_threshold
+            };
+            distance_from_range * 0.5
+        };
+
+        let word_cost = if duration > self.gap_clusters.inter_to_word_threshold {
+            // Long gap - low cost for word gap
+            (duration - self.gap_clusters.inter_to_word_threshold * 1.2).abs() * 0.1
+        } else {
+            // Not a long gap - higher cost for word gap
+            (self.gap_clusters.inter_to_word_threshold - duration) * 0.5
+        };
 
         [
-            (
-                GapType::IntraCharacter,
-                -ln_pdf_lognormal(duration, ln_1t, self.sigma),
-            ),
-            (
-                GapType::InterCharacter,
-                -ln_pdf_lognormal(duration, ln_3t, self.sigma),
-            ),
-            (
-                GapType::Word,
-                -ln_pdf_lognormal(duration, ln_7t, self.sigma),
-            ),
+            (GapType::IntraCharacter, intra_cost),
+            (GapType::InterCharacter, inter_cost),
+            (GapType::Word, word_cost),
         ]
     }
 
@@ -505,10 +532,13 @@ struct BeamSearchDecoder {
 }
 
 impl BeamSearchDecoder {
-    /// Create new beam search decoder
-    fn new(initial_timing: f32, params: BeamSearchParams) -> Self {
-        let timing_tracker = TimingTracker::new(initial_timing);
-        let timing_model = ProbabilisticTimingModel::from_tracker(&timing_tracker);
+    /// Create new beam search decoder with adaptive gap clustering
+    fn new(timings: &MorseTimings, params: BeamSearchParams) -> Self {
+        let timing_tracker = TimingTracker::new(timings.dot_duration);
+        let timing_model = ProbabilisticTimingModel::from_tracker_and_clusters(
+            &timing_tracker,
+            timings.gap_clusters.clone(),
+        );
 
         let mut decoder = Self {
             hypotheses: vec![Hypothesis::new()],
@@ -712,8 +742,11 @@ impl BeamSearchDecoder {
     fn update_timing(&mut self, signal: &MorseSignal) {
         if signal.on {
             self.timing_tracker.update_from_on_signal(signal.seconds);
-            // Update probabilistic timing model with new tracker state
-            self.timing_model = ProbabilisticTimingModel::from_tracker(&self.timing_tracker);
+            // Update probabilistic timing model with new tracker state but keep gap clusters
+            self.timing_model = ProbabilisticTimingModel::from_tracker_and_clusters(
+                &self.timing_tracker,
+                self.timing_model.gap_clusters.clone(),
+            );
         }
     }
 }
@@ -735,9 +768,9 @@ fn parse_morse_signals_beam_search(
         return result;
     }
 
-    // Initialize beam search with default parameters
+    // Initialize beam search with default parameters and adaptive gap clustering
     let params = BeamSearchParams::default();
-    let mut decoder = BeamSearchDecoder::new(timings.dot_duration, params);
+    let mut decoder = BeamSearchDecoder::new(timings, params);
 
     let _recognized_patterns = 0;
     let _total_patterns = 0;
@@ -805,22 +838,28 @@ fn parse_morse_signals_beam_search(
     result
 }
 
-/// Detected timing thresholds for morse interpretation
-/// Only dot_duration is used as initial estimate for TimingTracker
+/// Detected timing thresholds for morse interpretation using adaptive clustering
 #[derive(Debug, Clone)]
 struct MorseTimings {
     dot_duration: f32,
+    /// Clustering-based gap thresholds (discovered from actual signal patterns)
+    gap_clusters: GapClusters,
+}
+
+/// Gap classification thresholds discovered through clustering
+#[derive(Debug, Clone)]
+struct GapClusters {
+    /// Threshold between intra-character and inter-character gaps
+    intra_to_inter_threshold: f32,
+    /// Threshold between inter-character and word gaps
+    inter_to_word_threshold: f32,
 }
 
 impl MorseTimings {
-    /// Create timings from signal analysis with adaptive thresholds
+    /// Create timings from signal analysis with adaptive clustering
     fn from_signals(signals: &[MorseSignal]) -> Result<Self, String> {
         // Hardcoded noise threshold - filter out very short signals
         const NOISE_THRESHOLD: f32 = 0.01;
-
-        // Prior assumption about WPM - helps with initial classification
-        // TODO: Consider parameterizing this in the future
-        const PRIOR_WPM: i32 = 15;
 
         // Separate on and off signals, filtering noise
         let on_durations: Vec<f32> = signals
@@ -829,7 +868,7 @@ impl MorseTimings {
             .map(|s| s.seconds)
             .collect();
 
-        let _off_durations: Vec<f32> = signals
+        let off_durations: Vec<f32> = signals
             .iter()
             .filter(|s| !s.on && s.seconds >= NOISE_THRESHOLD)
             .map(|s| s.seconds)
@@ -839,21 +878,30 @@ impl MorseTimings {
             return Err("No valid on signals found".to_string());
         }
 
-        // Calculate expected dot duration from prior WPM assumption
-        // At 15 WPM: dot = 1.2 / 15 = 0.08 seconds
+        // Analyze ON durations to find dot duration (use existing logic)
+        let dot_duration = Self::find_dot_duration(&on_durations)?;
+
+        // NEW: Cluster OFF durations to find natural gap boundaries
+        let gap_clusters = Self::cluster_gap_durations(&off_durations, dot_duration)?;
+
+        Ok(Self {
+            dot_duration,
+            gap_clusters,
+        })
+    }
+
+    /// Find dot duration using existing dot/dash classification logic
+    fn find_dot_duration(on_durations: &[f32]) -> Result<f32, String> {
+        // Prior assumption about WPM for initial classification
+        const PRIOR_WPM: i32 = 15;
         let expected_dot_duration = 1.2 / PRIOR_WPM as f32;
         let expected_dash_duration = expected_dot_duration * 3.0;
 
-        // Analyze ON durations for dot/dash detection
-        let _on_stats =
-            TimingStats::new(on_durations.clone()).ok_or("Failed to analyze on signal timings")?;
-
-        // Use prior knowledge to classify signals, then adapt based on observed data
         let mut dot_candidates = Vec::new();
         let mut dash_candidates = Vec::new();
 
         // First pass: classify based on prior expectations
-        for &duration in &on_durations {
+        for &duration in on_durations {
             let dot_diff = (duration - expected_dot_duration).abs();
             let dash_diff = (duration - expected_dash_duration).abs();
 
@@ -864,9 +912,9 @@ impl MorseTimings {
             }
         }
 
-        // If we have both types, look for a natural breakpoint to refine classification
+        // Refine classification by finding natural breakpoint
         if !dot_candidates.is_empty() && !dash_candidates.is_empty() {
-            let mut sorted_durations = on_durations.clone();
+            let mut sorted_durations = on_durations.to_vec();
             sorted_durations.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
 
             // Find the biggest gap between consecutive durations
@@ -879,7 +927,6 @@ impl MorseTimings {
                     max_gap = gap;
                     let potential_split = (sorted_durations[i] + sorted_durations[i + 1]) / 2.0;
 
-                    // Only use this split if it's reasonable (between expected dot and dash)
                     if potential_split > expected_dot_duration * 0.5
                         && potential_split < expected_dash_duration * 1.5
                     {
@@ -890,46 +937,87 @@ impl MorseTimings {
 
             // Reclassify based on refined split point
             dot_candidates.clear();
-            dash_candidates.clear();
-
-            for &duration in &on_durations {
+            for &duration in on_durations {
                 if duration <= best_split {
                     dot_candidates.push(duration);
-                } else {
-                    dash_candidates.push(duration);
                 }
             }
         }
 
-        let dot_duration = if !dot_candidates.is_empty() {
-            TimingStats::new(dot_candidates.clone()).unwrap().median
+        if !dot_candidates.is_empty() {
+            Ok(TimingStats::new(dot_candidates).unwrap().median)
         } else {
-            // No dots found - use expected duration or scale from dashes
-            if !dash_candidates.is_empty() {
-                let dash_median = TimingStats::new(dash_candidates.clone()).unwrap().median;
-                dash_median / 3.0 // standard morse ratio
-            } else {
-                expected_dot_duration // fallback to prior
-            }
+            Ok(expected_dot_duration) // fallback to prior
+        }
+    }
+
+    /// Cluster OFF durations into short/medium/long gaps using adaptive thresholds
+    fn cluster_gap_durations(
+        off_durations: &[f32],
+        dot_duration: f32,
+    ) -> Result<GapClusters, String> {
+        if off_durations.is_empty() {
+            // No gaps - use traditional ratios as fallback
+            return Ok(GapClusters {
+                intra_to_inter_threshold: dot_duration * 2.0, // Between 1T and 3T
+                inter_to_word_threshold: dot_duration * 5.0,  // Between 3T and 7T
+            });
+        }
+
+        if off_durations.len() < 3 {
+            // Too few gaps to cluster meaningfully - use generous thresholds
+            let mut sorted_gaps = off_durations.to_vec();
+            sorted_gaps.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+
+            let mid_point = sorted_gaps[sorted_gaps.len() / 2];
+            return Ok(GapClusters {
+                intra_to_inter_threshold: mid_point * 0.7, // Generous threshold below median
+                inter_to_word_threshold: mid_point * 1.5,  // Generous threshold above median
+            });
+        }
+
+        // Sort gaps for clustering
+        let mut sorted_gaps = off_durations.to_vec();
+        sorted_gaps.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+
+        // Find natural breakpoints using largest gaps between consecutive values
+        let mut gap_differences: Vec<(f32, usize)> = Vec::new();
+        for i in 0..sorted_gaps.len() - 1 {
+            let diff = sorted_gaps[i + 1] - sorted_gaps[i];
+            gap_differences.push((diff, i));
+        }
+
+        // Sort by gap size (largest first)
+        gap_differences.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
+
+        // Use the two largest gaps as cluster boundaries
+        let mut breakpoints: Vec<usize> = gap_differences
+            .iter()
+            .take(2)
+            .map(|(_, idx)| *idx)
+            .collect();
+        breakpoints.sort();
+
+        let intra_to_inter_threshold = if !breakpoints.is_empty() {
+            // Threshold between first and second cluster
+            (sorted_gaps[breakpoints[0]] + sorted_gaps[breakpoints[0] + 1]) / 2.0
+        } else {
+            // Fallback: 1.5 * dot duration (between theoretical 1T and 3T)
+            dot_duration * 1.5
         };
 
-        let _dash_duration = if !dash_candidates.is_empty() {
-            TimingStats::new(dash_candidates.clone()).unwrap().median
+        let inter_to_word_threshold = if breakpoints.len() >= 2 {
+            // Threshold between second and third cluster
+            (sorted_gaps[breakpoints[1]] + sorted_gaps[breakpoints[1] + 1]) / 2.0
         } else {
-            // No dashes found - use expected duration or scale from dots
-            if !dot_candidates.is_empty() {
-                dot_duration * 3.0 // standard morse ratio
-            } else {
-                expected_dash_duration // fallback to prior
-            }
+            // Fallback: use a generous multiplier of the first threshold
+            intra_to_inter_threshold * 2.5
         };
 
-        // Calculate expected gap durations from prior WPM assumption
-        let _expected_element_gap = expected_dot_duration; // 1 dot duration
-        let _expected_char_gap = expected_dot_duration * 3.0; // 3 dot durations
-        let _expected_word_gap = expected_dot_duration * 7.0; // 7 dot durations
-
-        Ok(Self { dot_duration })
+        Ok(GapClusters {
+            intra_to_inter_threshold,
+            inter_to_word_threshold,
+        })
     }
 }
 
