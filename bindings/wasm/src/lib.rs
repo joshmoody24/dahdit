@@ -1,10 +1,6 @@
-// WebAssembly bindings to maintain JavaScript API compatibility
-use morse_core::types::*;
-use morse_core::{audio, timing};
-use js_sys::Array;
+// Clean WebAssembly bindings using pure serde for zero-duplication
+use morse_core::{audio, interpret, timing, types::*};
 use wasm_bindgen::prelude::*;
-
-mod support;
 
 // Console logging for debugging
 #[wasm_bindgen]
@@ -18,305 +14,230 @@ macro_rules! console_log {
     ($($t:tt)*) => (log(&format_args!($($t)*).to_string()))
 }
 
-// Macro to generate wasm_bindgen wrapper enums that mirror core enums
-macro_rules! wasm_enum {
-    (
-        $(#[$meta:meta])*
-        $vis:vis enum $name:ident {
-            $($variant:ident = $value:expr),* $(,)?
+// Combined configuration for both timing and audio parameters
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct MorseConfig {
+    // Timing parameters
+    pub wpm: i32,
+    pub word_gap_multiplier: f32,
+    pub humanization_factor: f32,
+    pub random_seed: u32,
+
+    // Audio parameters
+    pub sample_rate: i32,
+    pub volume: f32,
+    pub low_pass_cutoff: f32,
+    pub high_pass_cutoff: f32,
+    pub audio_mode: MorseAudioMode,
+
+    // Radio mode parameters
+    pub freq_hz: f32,
+    pub waveform_type: MorseWaveformType,
+    pub background_static_level: f32,
+
+    // Telegraph mode parameters
+    pub click_sharpness: f32,
+    pub resonance_freq: f32,
+    pub decay_rate: f32,
+    pub mechanical_noise: f32,
+    pub solenoid_response: f32,
+    pub room_tone_level: f32,
+    pub reverb_amount: f32,
+}
+
+impl Default for MorseConfig {
+    fn default() -> Self {
+        let timing_defaults = MorseTimingParams::default();
+        let audio_defaults = MorseAudioParams::default();
+
+        Self {
+            // Timing defaults
+            wpm: timing_defaults.wpm,
+            word_gap_multiplier: timing_defaults.word_gap_multiplier,
+            humanization_factor: timing_defaults.humanization_factor,
+            random_seed: timing_defaults.random_seed,
+
+            // Audio defaults
+            sample_rate: audio_defaults.sample_rate,
+            volume: audio_defaults.volume,
+            low_pass_cutoff: audio_defaults.low_pass_cutoff,
+            high_pass_cutoff: audio_defaults.high_pass_cutoff,
+            audio_mode: audio_defaults.audio_mode,
+
+            // Radio defaults
+            freq_hz: audio_defaults.radio_params.freq_hz,
+            waveform_type: audio_defaults.radio_params.waveform_type,
+            background_static_level: audio_defaults.radio_params.background_static_level,
+
+            // Telegraph defaults
+            click_sharpness: audio_defaults.telegraph_params.click_sharpness,
+            resonance_freq: audio_defaults.telegraph_params.resonance_freq,
+            decay_rate: audio_defaults.telegraph_params.decay_rate,
+            mechanical_noise: audio_defaults.telegraph_params.mechanical_noise,
+            solenoid_response: audio_defaults.telegraph_params.solenoid_response,
+            room_tone_level: audio_defaults.telegraph_params.room_tone_level,
+            reverb_amount: audio_defaults.telegraph_params.reverb_amount,
         }
-        from $core_type:ty
-    ) => {
-        #[wasm_bindgen]
-        $(#[$meta])*
-        $vis enum $name {
-            $($variant = $value),*
+    }
+}
+
+impl MorseConfig {
+    fn to_timing_params(&self) -> MorseTimingParams {
+        MorseTimingParams {
+            wpm: self.wpm,
+            word_gap_multiplier: self.word_gap_multiplier,
+            humanization_factor: self.humanization_factor,
+            random_seed: self.random_seed,
         }
+    }
 
-        impl From<$core_type> for $name {
-            fn from(value: $core_type) -> Self {
-                match value {
-                    $(<$core_type>::$variant => $name::$variant),*
-                }
-            }
+    fn to_audio_params(&self) -> MorseAudioParams {
+        MorseAudioParams {
+            sample_rate: self.sample_rate,
+            volume: self.volume,
+            low_pass_cutoff: self.low_pass_cutoff,
+            high_pass_cutoff: self.high_pass_cutoff,
+            audio_mode: self.audio_mode,
+            radio_params: MorseRadioParams {
+                freq_hz: self.freq_hz,
+                waveform_type: self.waveform_type,
+                background_static_level: self.background_static_level,
+            },
+            telegraph_params: MorseTelegraphParams {
+                click_sharpness: self.click_sharpness,
+                resonance_freq: self.resonance_freq,
+                decay_rate: self.decay_rate,
+                mechanical_noise: self.mechanical_noise,
+                solenoid_response: self.solenoid_response,
+                room_tone_level: self.room_tone_level,
+                reverb_amount: self.reverb_amount,
+            },
         }
-
-        impl From<$name> for $core_type {
-            fn from(value: $name) -> Self {
-                match value {
-                    $($name::$variant => <$core_type>::$variant),*
-                }
-            }
-        }
-    };
-}
-
-// Re-export enums with wasm_bindgen for JavaScript compatibility
-wasm_enum! {
-    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-    pub enum MorseAudioMode {
-        Radio = 0,
-        Telegraph = 1,
     }
-    from morse_core::types::MorseAudioMode
 }
 
-wasm_enum! {
-    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-    pub enum MorseWaveformType {
-        Sine = 0,
-        Square = 1,
-        Sawtooth = 2,
-        Triangle = 3,
-    }
-    from morse_core::types::MorseWaveformType
-}
+// Pure serde-based API functions that return JSON strings
 
-// JavaScript-compatible result type
+/// Generate morse timing elements as JSON
 #[wasm_bindgen]
-pub struct MorseTimingResult {
-    elements: Vec<MorseElement>,
-}
-
-#[wasm_bindgen]
-impl MorseTimingResult {
-    #[wasm_bindgen(getter)]
-    pub fn length(&self) -> usize {
-        self.elements.len()
-    }
-
-    #[wasm_bindgen(getter)]
-    pub fn elements(&self) -> Array {
-        let array = Array::new();
-        for element in &self.elements {
-            let obj = js_sys::Object::new();
-            let element_type = match element.element_type {
-                MorseElementType::Dot => "dot",
-                MorseElementType::Dash => "dash",
-                MorseElementType::Gap => "gap",
-            };
-            js_sys::Reflect::set(&obj, &"type".into(), &element_type.into()).unwrap();
-            js_sys::Reflect::set(
-                &obj,
-                &"duration_seconds".into(),
-                &element.duration_seconds.into(),
-            )
-            .unwrap();
-            array.push(&obj);
-        }
-        array
-    }
-}
-
-#[wasm_bindgen]
-pub struct MorseAudioResult {
-    audio_data: Vec<f32>,
-    sample_rate: i32,
-    duration: f32,
-}
-
-#[wasm_bindgen]
-impl MorseAudioResult {
-    #[wasm_bindgen(getter)]
-    pub fn audio_data(&self) -> Vec<f32> {
-        self.audio_data.clone()
-    }
-
-    #[wasm_bindgen(getter)]
-    pub fn sample_rate(&self) -> i32 {
-        self.sample_rate
-    }
-
-    #[wasm_bindgen(getter)]
-    pub fn duration(&self) -> f32 {
-        self.duration
-    }
-}
-
-// Main JavaScript API functions
-
-#[wasm_bindgen]
-pub fn generate_morse_timing(text: &str, config_json: &str) -> Result<MorseTimingResult, JsValue> {
-    let params = support::parse_with_defaults::<MorseTimingParams>(config_json);
-    
-    timing::morse_timing(text, &params)
-        .map(|elements| MorseTimingResult { elements })
-        .map_err(|e| JsValue::from_str(&e))
-}
-
-#[wasm_bindgen]
-pub fn generate_morse_audio(text: &str, config_json: &str) -> Result<MorseAudioResult, JsValue> {
-    // Parse JSON into a generic Value first for manual discriminated union handling
-    let config_value: serde_json::Value = if config_json.trim().is_empty() || config_json == "{}" {
-        serde_json::Value::Object(serde_json::Map::new())
+pub fn morse_timing_json(text: &str, config_json: &str) -> Result<String, JsValue> {
+    let config: MorseConfig = if config_json.trim().is_empty() {
+        MorseConfig::default()
     } else {
         serde_json::from_str(config_json)
-            .unwrap_or_else(|_| serde_json::Value::Object(serde_json::Map::new()))
+            .map_err(|e| JsValue::from_str(&format!("Invalid config JSON: {}", e)))?
     };
 
-    // Debug: log the raw JSON received
-    log(&format!("WASM RAW JSON: {}", config_json));
+    let timing_params = config.to_timing_params();
+    let elements = timing::morse_timing(text, &timing_params)
+        .map_err(|e| JsValue::from_str(&e))?;
 
-    // Extract timing parameters using our helper
-    let timing_params: MorseTimingParams = serde_json::from_value(config_value.clone())
-        .unwrap_or_else(|_| MorseTimingParams::default());
+    serde_json::to_string(&elements)
+        .map_err(|e| JsValue::from_str(&format!("JSON serialization error: {}", e)))
+}
 
-    // Parse audio parameters manually for discriminated union support
-    let mut audio_params = MorseAudioParams::default();
-
-    // Parse common parameters
-    if let Some(volume) = config_value.get("volume") {
-        if let Some(vol) = volume.as_f64() {
-            audio_params.volume = vol as f32;
-        }
-    }
-    if let Some(sample_rate) = config_value.get("sampleRate") {
-        if let Some(sr) = sample_rate.as_i64() {
-            audio_params.sample_rate = sr as i32;
-        }
-    }
-    if let Some(audio_mode) = config_value.get("audioMode") {
-        if let Some(mode) = audio_mode.as_i64() {
-            audio_params.audio_mode = if mode == 1 {
-                morse_core::types::MorseAudioMode::Telegraph
-            } else {
-                morse_core::types::MorseAudioMode::Radio
-            };
-        }
-    }
-
-    // Parse mode-specific parameters based on audioMode
-    match audio_params.audio_mode {
-        morse_core::types::MorseAudioMode::Radio => {
-            if let Some(freq_hz) = config_value.get("freqHz") {
-                if let Some(freq) = freq_hz.as_f64() {
-                    audio_params.radio_params.freq_hz = freq as f32;
-                }
-            }
-            if let Some(waveform_type) = config_value.get("waveformType") {
-                if let Some(wt) = waveform_type.as_i64() {
-                    audio_params.radio_params.waveform_type = match wt {
-                        1 => morse_core::types::MorseWaveformType::Square,
-                        2 => morse_core::types::MorseWaveformType::Sawtooth,
-                        3 => morse_core::types::MorseWaveformType::Triangle,
-                        _ => morse_core::types::MorseWaveformType::Sine,
-                    };
-                }
-            }
-            if let Some(bg_static) = config_value.get("backgroundStaticLevel") {
-                if let Some(bg) = bg_static.as_f64() {
-                    audio_params.radio_params.background_static_level = bg as f32;
-                }
-            }
-        }
-        morse_core::types::MorseAudioMode::Telegraph => {
-            if let Some(click_sharpness) = config_value.get("clickSharpness") {
-                if let Some(cs) = click_sharpness.as_f64() {
-                    audio_params.telegraph_params.click_sharpness = cs as f32;
-                }
-            }
-            if let Some(resonance_freq) = config_value.get("resonanceFreq") {
-                if let Some(rf) = resonance_freq.as_f64() {
-                    audio_params.telegraph_params.resonance_freq = rf as f32;
-                }
-            }
-            if let Some(decay_rate) = config_value.get("decayRate") {
-                if let Some(dr) = decay_rate.as_f64() {
-                    audio_params.telegraph_params.decay_rate = dr as f32;
-                }
-            }
-            if let Some(mechanical_noise) = config_value.get("mechanicalNoise") {
-                if let Some(mn) = mechanical_noise.as_f64() {
-                    audio_params.telegraph_params.mechanical_noise = mn as f32;
-                }
-            }
-            if let Some(solenoid_response) = config_value.get("solenoidResponse") {
-                if let Some(sr) = solenoid_response.as_f64() {
-                    audio_params.telegraph_params.solenoid_response = sr as f32;
-                }
-            }
-            if let Some(room_tone_level) = config_value.get("roomToneLevel") {
-                if let Some(rtl) = room_tone_level.as_f64() {
-                    audio_params.telegraph_params.room_tone_level = rtl as f32;
-                }
-            }
-            if let Some(reverb_amount) = config_value.get("reverbAmount") {
-                if let Some(ra) = reverb_amount.as_f64() {
-                    audio_params.telegraph_params.reverb_amount = ra as f32;
-                }
-            }
-        }
-    }
+/// Generate morse audio as JSON (with embedded base64 audio data)
+#[wasm_bindgen]
+pub fn morse_audio_json(text: &str, config_json: &str) -> Result<String, JsValue> {
+    let config: MorseConfig = if config_json.trim().is_empty() {
+        MorseConfig::default()
+    } else {
+        serde_json::from_str(config_json)
+            .map_err(|e| JsValue::from_str(&format!("Invalid config JSON: {}", e)))?
+    };
 
     // Generate timing elements
-    let timing_elements =
-        timing::morse_timing(text, &timing_params).map_err(|e| JsValue::from_str(&e))?;
+    let timing_params = config.to_timing_params();
+    let timing_elements = timing::morse_timing(text, &timing_params)
+        .map_err(|e| JsValue::from_str(&e))?;
+
+    // Generate audio
+    let audio_params = config.to_audio_params();
+    let audio_data = audio::morse_audio(&timing_elements, &audio_params)
+        .map_err(|e| JsValue::from_str(&e))?;
 
     // Calculate total duration
     let total_duration: f32 = timing_elements.iter().map(|e| e.duration_seconds).sum();
 
-    // Generate audio
-    let audio_data =
-        audio::morse_audio(&timing_elements, &audio_params).map_err(|e| JsValue::from_str(&e))?;
+    // Return structured result as JSON
+    let result = serde_json::json!({
+        "audioData": audio_data,
+        "sampleRate": audio_params.sample_rate,
+        "duration": total_duration,
+        "elements": timing_elements
+    });
 
-    Ok(MorseAudioResult {
-        audio_data,
-        sample_rate: audio_params.sample_rate,
-        duration: total_duration,
-    })
+    serde_json::to_string(&result)
+        .map_err(|e| JsValue::from_str(&format!("JSON serialization error: {}", e)))
 }
 
+/// Interpret morse signals from JSON
 #[wasm_bindgen]
-pub struct MorseInterpretResultJs {
-    text: String,
-    confidence: f32,
-    signals_processed: i32,
-    patterns_recognized: i32,
-}
-
-#[wasm_bindgen]
-impl MorseInterpretResultJs {
-    #[wasm_bindgen(getter)]
-    pub fn text(&self) -> String {
-        self.text.clone()
-    }
-
-    #[wasm_bindgen(getter)]
-    pub fn confidence(&self) -> f32 {
-        self.confidence
-    }
-
-    #[wasm_bindgen(getter)]
-    pub fn signals_processed(&self) -> i32 {
-        self.signals_processed
-    }
-
-    #[wasm_bindgen(getter)]
-    pub fn patterns_recognized(&self) -> i32 {
-        self.patterns_recognized
-    }
-}
-
-#[wasm_bindgen]
-pub fn interpret_morse_signals(
-    signals_json: &str,
-    config_json: &str,
-) -> Result<MorseInterpretResultJs, JsValue> {
-    // Parse signals from JSON
-    let signals: Vec<morse_core::types::MorseSignal> = serde_json::from_str(signals_json)
+pub fn morse_interpret_json(signals_json: &str, config_json: &str) -> Result<String, JsValue> {
+    let signals: Vec<MorseSignal> = serde_json::from_str(signals_json)
         .map_err(|e| JsValue::from_str(&format!("Invalid signals JSON: {}", e)))?;
 
-    // Parse config with defaults
-    let params = support::parse_with_defaults::<morse_core::types::MorseInterpretParams>(config_json);
+    let params: MorseInterpretParams = if config_json.trim().is_empty() {
+        MorseInterpretParams::default()
+    } else {
+        serde_json::from_str(config_json)
+            .map_err(|e| JsValue::from_str(&format!("Invalid config JSON: {}", e)))?
+    };
 
-    // Use the morse interpret function from our interpret module
-    let result =
-        morse_core::interpret::morse_interpret(&signals, &params).map_err(|e| JsValue::from_str(&e))?;
+    let result = interpret::morse_interpret(&signals, &params)
+        .map_err(|e| JsValue::from_str(&e))?;
 
-    Ok(MorseInterpretResultJs {
-        text: result.text,
-        confidence: result.confidence,
-        signals_processed: result.signals_processed,
-        patterns_recognized: result.patterns_recognized,
-    })
+    serde_json::to_string(&result)
+        .map_err(|e| JsValue::from_str(&format!("JSON serialization error: {}", e)))
+}
+
+// Alternative API using wasm-bindgen's direct serde integration (experimental)
+
+/// Generate morse timing using JsValue (direct serde integration)
+#[wasm_bindgen]
+pub fn morse_timing_direct(text: &str, config: &JsValue) -> Result<JsValue, JsValue> {
+    let config: MorseConfig = if config.is_undefined() || config.is_null() {
+        MorseConfig::default()
+    } else {
+        serde_wasm_bindgen::from_value(config.clone())?
+    };
+
+    let timing_params = config.to_timing_params();
+    let elements = timing::morse_timing(text, &timing_params)
+        .map_err(|e| JsValue::from_str(&e))?;
+
+    serde_wasm_bindgen::to_value(&elements)
+        .map_err(|e| JsValue::from_str(&format!("Serialization error: {}", e)))
+}
+
+/// Generate morse audio using JsValue (direct serde integration)
+#[wasm_bindgen]
+pub fn morse_audio_direct(text: &str, config: &JsValue) -> Result<JsValue, JsValue> {
+    let config: MorseConfig = if config.is_undefined() || config.is_null() {
+        MorseConfig::default()
+    } else {
+        serde_wasm_bindgen::from_value(config.clone())?
+    };
+
+    // Generate timing and audio
+    let timing_params = config.to_timing_params();
+    let timing_elements = timing::morse_timing(text, &timing_params)
+        .map_err(|e| JsValue::from_str(&e))?;
+
+    let audio_params = config.to_audio_params();
+    let audio_data = audio::morse_audio(&timing_elements, &audio_params)
+        .map_err(|e| JsValue::from_str(&e))?;
+
+    let total_duration: f32 = timing_elements.iter().map(|e| e.duration_seconds).sum();
+
+    let result = serde_json::json!({
+        "audioData": audio_data,
+        "sampleRate": audio_params.sample_rate,
+        "duration": total_duration,
+        "elements": timing_elements
+    });
+
+    serde_wasm_bindgen::to_value(&result)
+        .map_err(|e| JsValue::from_str(&format!("Serialization error: {}", e)))
 }

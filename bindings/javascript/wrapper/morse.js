@@ -15,11 +15,9 @@ if (isNode) {
 // Extract what we need from WASM module
 const {
   default: wasmInit,
-  generate_morse_timing,
-  generate_morse_audio,
-  interpret_morse_signals,
-  MorseAudioMode,
-  MorseWaveformType,
+  morse_timing_json,
+  morse_audio_json,
+  morse_interpret_json,
 } = wasmModule;
 
 // Initialize WASM immediately
@@ -38,39 +36,11 @@ if (isNode) {
 }
 
 /**
- * Morse audio modes for different sound characteristics
- * @readonly
- * @enum {number}
- */
-export const AudioMode = MorseAudioMode;
-
-/**
- * Waveform types for radio mode audio generation
- * @readonly
- * @enum {number}
- */
-export const WaveformType = MorseWaveformType;
-
-/**
- * @typedef {Object} MorseTimingElement
- * @property {string} type - Element type: "dot", "dash", or "gap"
- * @property {number} duration_seconds - Duration in seconds
- */
-
-/**
- * @typedef {Object} TimingConfig
- * @property {number} [wpm=20] - Words per minute (5-50 recommended)
- * @property {number} [wordGapMultiplier=1.0] - Multiplier for word gap duration
- * @property {number} [humanizationFactor=0.0] - Amount of timing variation (0.0-1.0)
- * @property {number} [randomSeed=0] - Random seed for consistent humanization
- */
-
-/**
  * Generate morse code timing elements from text
  *
  * @param {string} text - The text to convert to morse code
- * @param {TimingConfig} [config={}] - Optional timing configuration
- * @returns {Array<MorseTimingElement>} Array of timing elements with type and duration
+ * @param {Object} [config={}] - Optional timing configuration
+ * @returns {Array<Object>} Array of timing elements with type and duration
  * @throws {Error} If text is invalid or parameters are out of range
  *
  * @example
@@ -89,78 +59,18 @@ export function generateMorseTiming(text, config = {}) {
   if (!text || typeof text !== "string") {
     throw new Error("Text must be a non-empty string");
   }
-  if (
-    config.wpm !== undefined &&
-    (!Number.isInteger(config.wpm) || config.wpm <= 0 || config.wpm > 100)
-  ) {
-    throw new Error("WPM must be a positive integer between 1-100");
-  }
 
-  // Convert config object to JSON string for Rust
   const configJson = JSON.stringify(config);
-  const result = generate_morse_timing(text, configJson);
-  const elements = result.elements;
-  result.free(); // Clean up Rust memory
-  return elements;
+  const resultJson = morse_timing_json(text, configJson);
+  return JSON.parse(resultJson);
 }
-
-/**
- * @typedef {Object} BaseAudioConfig
- * @property {number} [wpm=20] - Words per minute for timing
- * @property {number} [wordGapMultiplier=1.0] - Multiplier for word gap duration
- * @property {number} [humanizationFactor=0.0] - Amount of timing variation (0.0-1.0)
- * @property {number} [randomSeed=0] - Random seed for consistent variation
- * @property {number} [sampleRate=44100] - Audio sample rate in Hz
- * @property {number} [volume=0.5] - Audio volume (0.0-1.0)
- * @property {number} [lowPassCutoff=20000] - Low-pass filter frequency in Hz
- * @property {number} [highPassCutoff=20] - High-pass filter frequency in Hz
- */
-
-/**
- * @typedef {BaseAudioConfig & {
- *   audioMode: typeof AudioMode.Radio,
- *   freqHz?: number,
- *   waveformType?: WaveformType,
- *   backgroundStaticLevel?: number
- * }} RadioAudioConfig
- * @property {number} [freqHz=440] - Radio frequency in Hz
- * @property {WaveformType} [waveformType=WaveformType.Sine] - Waveform type for radio tone
- * @property {number} [backgroundStaticLevel=0.0] - Background static level (0.0-1.0)
- */
-
-/**
- * @typedef {BaseAudioConfig & {
- *   audioMode: typeof AudioMode.Telegraph,
- *   clickSharpness?: number,
- *   resonanceFreq?: number,
- *   decayRate?: number,
- *   mechanicalNoise?: number,
- *   solenoidResponse?: number,
- *   roomToneLevel?: number,
- *   reverbAmount?: number
- * }} TelegraphAudioConfig
- * @property {number} [clickSharpness=0.5] - Click sharpness factor (0.0-1.0)
- * @property {number} [resonanceFreq=800] - Resonance frequency in Hz
- * @property {number} [decayRate=10] - Decay rate for telegraph clicks
- * @property {number} [mechanicalNoise=0.1] - Mechanical noise level (0.0-1.0)
- * @property {number} [solenoidResponse=0.7] - Solenoid response factor
- * @property {number} [roomToneLevel=0.05] - Room tone level (0.0-1.0)
- * @property {number} [reverbAmount=0.3] - Reverb amount (0.0-1.0)
- */
-
-/**
- * @typedef {Object} MorseAudioResult
- * @property {Float32Array} audioData - Raw audio sample data
- * @property {number} sampleRate - Sample rate in Hz
- * @property {number} duration - Duration in seconds
- */
 
 /**
  * Generate morse code audio from text
  *
  * @param {string} text - The text to convert to morse code audio
- * @param {BaseAudioConfig | RadioAudioConfig | TelegraphAudioConfig} [config={}] - Audio configuration
- * @returns {MorseAudioResult} Object with audio data, sample rate, and duration
+ * @param {Object} [config={}] - Audio configuration
+ * @returns {Object} Object with audioData, sampleRate, duration, and elements
  * @throws {Error} If text is invalid or parameters are out of range
  *
  * @example
@@ -170,16 +80,16 @@ export function generateMorseTiming(text, config = {}) {
  * @example
  * // Radio mode with custom frequency and waveform
  * const audio = generateMorseAudio("CQ CQ", {
- *   audioMode: AudioMode.Radio,
+ *   audioMode: "radio",
  *   freqHz: 600,
- *   waveformType: WaveformType.Square,
+ *   waveformType: "square",
  *   backgroundStaticLevel: 0.1
  * });
  *
  * @example
  * // Telegraph mode with mechanical characteristics
  * const audio = generateMorseAudio("SOS", {
- *   audioMode: AudioMode.Telegraph,
+ *   audioMode: "telegraph",
  *   wpm: 12,
  *   clickSharpness: 0.8,
  *   mechanicalNoise: 0.15,
@@ -192,28 +102,24 @@ export function generateMorseAudio(text, config = {}) {
     throw new Error("Text must be a non-empty string");
   }
 
-  // Convert config object to JSON string for Rust
   const configJson = JSON.stringify(config);
-  const result = generate_morse_audio(text, configJson);
-  const audioData = result.audio_data;
-  const sampleRate = result.sample_rate;
-  const duration = result.duration;
-  result.free(); // Clean up Rust memory
-  return { audioData, sampleRate, duration };
-}
+  const resultJson = morse_audio_json(text, configJson);
+  const result = JSON.parse(resultJson);
 
-/**
- * @typedef {Object} AudioPlayer
- * @property {() => void} stop - Stop audio playback
- * @property {boolean} playing - True if audio is currently playing
- */
+  return {
+    audioData: new Float32Array(result.audioData),
+    sampleRate: result.sampleRate,
+    duration: result.duration,
+    elements: result.elements,
+  };
+}
 
 /**
  * Play morse code audio in the browser using Web Audio API
  *
- * @param {MorseAudioResult} audioResult - Audio data from generateMorseAudio()
+ * @param {Object} audioResult - Audio data from generateMorseAudio()
  * @param {Object} [config={}] - Optional playback configuration
- * @returns {AudioPlayer} Playback controller with stop() method and playing getter
+ * @returns {Object} Playback controller with stop() method and playing getter
  * @throws {Error} If not in browser environment or audio data is invalid
  *
  * @example
@@ -299,30 +205,11 @@ export function playMorseAudio(audioResult, config = {}) {
 }
 
 /**
- * @typedef {Object} MorseSignal
- * @property {boolean} on - True for tone on (dot/dash), false for gap
- * @property {number} seconds - Duration of signal in seconds
- */
-
-/**
- * @typedef {Object} InterpretConfig
- * @property {number} [maxOutputLength=1000] - Maximum output text length
- */
-
-/**
- * @typedef {Object} MorseInterpretResult
- * @property {string} text - Decoded text from morse signals
- * @property {number} confidence - Confidence score (0.0-1.0)
- * @property {number} signalsProcessed - Number of signals processed
- * @property {number} patternsRecognized - Number of patterns recognized
- */
-
-/**
  * Interpret morse code signals and convert them back to text
  *
- * @param {Array<MorseSignal>} signals - Array of morse signal objects
- * @param {InterpretConfig} [config={}] - Optional interpretation parameters
- * @returns {MorseInterpretResult} Interpretation result with text, confidence, and statistics
+ * @param {Array<Object>} signals - Array of morse signal objects with 'on' (boolean) and 'seconds' (number)
+ * @param {Object} [config={}] - Optional interpretation parameters
+ * @returns {Object} Interpretation result with text, confidence, and statistics
  * @throws {Error} If signals array is invalid
  *
  * @example
@@ -362,20 +249,18 @@ export function interpretMorseSignals(signals, config = {}) {
     }
   }
 
-  // Convert config object to JSON string for Rust
+  // Convert to JSON strings for Rust
   const configJson = JSON.stringify(config);
   const signalsJson = JSON.stringify(signals);
 
-  const result = interpret_morse_signals(signalsJson, configJson);
+  const resultJson = morse_interpret_json(signalsJson, configJson);
+  const result = JSON.parse(resultJson);
 
-  // Create JavaScript object from Rust result
-  const jsResult = {
+  // Convert snake_case to camelCase for JavaScript consistency
+  return {
     text: result.text,
     confidence: result.confidence,
     signalsProcessed: result.signals_processed,
     patternsRecognized: result.patterns_recognized,
   };
-
-  result.free(); // Clean up Rust memory
-  return jsResult;
 }

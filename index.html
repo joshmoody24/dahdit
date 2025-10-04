@@ -280,8 +280,8 @@
             <div class="param-group">
                 <label for="audioMode">Audio Mode:</label>
                 <select id="audioMode">
-                    <option value="0">Radio</option>
-                    <option value="1">Telegraph</option>
+                    <option value="radio">Radio</option>
+                    <option value="telegraph">Telegraph</option>
                 </select>
             </div>
 
@@ -295,10 +295,10 @@
             <div class="param-group" id="waveformGroup">
                 <label for="waveform">Waveform:</label>
                 <select id="waveform">
-                    <option value="0">Sine</option>
-                    <option value="1">Square</option>
-                    <option value="2">Sawtooth</option>
-                    <option value="3">Triangle</option>
+                    <option value="sine">Sine</option>
+                    <option value="square">Square</option>
+                    <option value="sawtooth">Sawtooth</option>
+                    <option value="triangle">Triangle</option>
                 </select>
             </div>
 
@@ -374,7 +374,7 @@
     <div id="status">Ready! Enter text and click Play.</div>
 
     <script type="module">
-        import { generateMorseAudio, playMorseAudio, AudioMode, WaveformType } from './bindings/javascript/wrapper/morse.js';
+        import { generateMorseAudio, playMorseAudio } from './bindings/javascript/wrapper/morse.js';
 
         let currentSource = null;
         let lastGeneratedAudio = null;
@@ -452,7 +452,7 @@
 
         // Show/hide parameters based on audio mode
         function updateModeVisibility() {
-            const audioMode = parseInt(document.getElementById('audioMode').value);
+            const audioMode = document.getElementById('audioMode').value;
 
             // Group related parameter elements
             const radioElements = [
@@ -483,7 +483,7 @@
                 });
             };
 
-            if (audioMode === AudioMode.Radio) {
+            if (audioMode === "radio") {
                 toggleGroup(radioElements, true);
                 toggleGroup(telegraphElements, false);
             } else {
@@ -541,7 +541,7 @@
             isGenerating = true;
             updatePlayPauseButton();
 
-            const audioMode = parseInt(document.getElementById('audioMode').value);
+            const audioMode = document.getElementById('audioMode').value;
             const text = document.getElementById('text').value;
             const params = {
                 wpm: parseInt(document.getElementById('wpm').value),
@@ -553,11 +553,11 @@
             };
 
             // Add mode-specific parameters (flat structure)
-            if (audioMode === AudioMode.Radio) {
+            if (audioMode === "radio") {
                 params.freqHz = parseInt(document.getElementById('frequency').value);
-                params.waveformType = parseInt(document.getElementById('waveform').value);
+                params.waveformType = document.getElementById('waveform').value;
                 params.backgroundStaticLevel = parseFloat(document.getElementById('backgroundStatic').value) / 100;
-            } else if (audioMode === AudioMode.Telegraph) {
+            } else if (audioMode === "telegraph") {
                 params.clickSharpness = parseFloat(document.getElementById('clickSharpness').value) / 100;
                 params.resonanceFreq = parseFloat(document.getElementById('resonanceFreq').value);
                 params.decayRate = parseFloat(document.getElementById('decayRate').value);

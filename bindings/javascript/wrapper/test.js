@@ -5,8 +5,6 @@ import {
   generateMorseAudio,
   playMorseAudio,
   interpretMorseSignals,
-  AudioMode,
-  WaveformType,
 } from "./morse.js";
 
 // Simple test framework
@@ -51,7 +49,7 @@ test("multi_character_timing", () => {
 test("wpm_parameter", () => {
   const fast = generateMorseTiming("E", { wpm: 40 });
   const slow = generateMorseTiming("E", { wpm: 10 });
-  return fast[0].duration_seconds < slow[0].duration_seconds;
+  return fast[0].durationSeconds < slow[0].durationSeconds;
 });
 
 // Test audio generation
@@ -68,9 +66,9 @@ test("audio_generation", () => {
 // Test radio mode audio
 test("radio_mode", () => {
   const result = generateMorseAudio("E", {
-    audioMode: AudioMode.Radio,
+    audioMode: "radio",
     freqHz: 600,
-    waveformType: WaveformType.Sine,
+    waveformType: "sine",
   });
   return result && result.audioData && result.audioData.length > 0;
 });
@@ -78,7 +76,7 @@ test("radio_mode", () => {
 // Test telegraph mode audio
 test("telegraph_mode", () => {
   const result = generateMorseAudio("E", {
-    audioMode: AudioMode.Telegraph,
+    audioMode: "telegraph",
     clickSharpness: 0.7,
     resonanceFreq: 800,
   });
@@ -88,16 +86,16 @@ test("telegraph_mode", () => {
 // Test different waveforms
 test("different_waveforms", () => {
   const sine = generateMorseAudio("E", {
-    waveformType: WaveformType.Sine,
+    waveformType: "sine",
   });
   const square = generateMorseAudio("E", {
-    waveformType: WaveformType.Square,
+    waveformType: "square",
   });
   const sawtooth = generateMorseAudio("E", {
-    waveformType: WaveformType.Sawtooth,
+    waveformType: "sawtooth",
   });
   const triangle = generateMorseAudio("E", {
-    waveformType: WaveformType.Triangle,
+    waveformType: "triangle",
   });
 
   return (

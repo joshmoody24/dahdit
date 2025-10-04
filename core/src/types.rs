@@ -1,30 +1,35 @@
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum MorseElementType {
-    Dot = 0,
-    Dash = 1,
-    Gap = 2,
+    Dot,
+    Dash,
+    Gap,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct MorseElement {
+    #[serde(rename = "type")]
     pub element_type: MorseElementType,
     pub duration_seconds: f32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum MorseAudioMode {
-    Radio = 0,
-    Telegraph = 1,
+    Radio,
+    Telegraph,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum MorseWaveformType {
-    Sine = 0,
-    Square = 1,
-    Sawtooth = 2,
-    Triangle = 3,
+    Sine,
+    Square,
+    Sawtooth,
+    Triangle,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
