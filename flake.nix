@@ -21,9 +21,9 @@
         packages = [
           pkgs.gnumake
           pkgs.gcc
-          pkgs.emscripten
           (pkgs.rust-bin.stable.latest.default.override {
             targets = [ "wasm32-unknown-unknown" ];
+            extensions = [ "rust-src" "rust-analyzer" ];
           })
           pkgs.wasm-pack
           pkgs.nodejs

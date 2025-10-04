@@ -28,6 +28,6 @@ format:
 lint:
 	cd core && cargo clippy -- -D warnings
 
-# Development workflow - format, lint, test, then build
-dev: format lint test build
+# Development workflow - format, lint, build, then test
+dev: format lint build test
 	@echo "All checks passed and build completed successfully!"
